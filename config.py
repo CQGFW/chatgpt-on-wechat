@@ -196,6 +196,8 @@ available_setting = {
     "minimax_api_key": "",
     "Minimax_group_id": "",
     "Minimax_base_url": "",
+    "deepseek_api_key": "",
+    "deepseek_api_base": "https://api.deepseek.com/v1",
     "web_port": 9899,
     "web_password": "",  # Web console password; empty means no authentication required
     "web_session_expire_days": 30,  # Auth session expiry in days
@@ -204,8 +206,12 @@ available_setting = {
     "agent_max_context_tokens": 50000,  # Agent模式下最大上下文tokens
     "agent_max_context_turns": 20,  # Agent模式下最大上下文记忆轮次
     "agent_max_steps": 20,  # Agent模式下单次运行最大决策步数
-    "enable_thinking": True,  # Whether to enable deep thinking for web channel
+    "enable_thinking": False,  # Enable deep-thinking mode for thinking-capable models
     "knowledge": True,  # 是否开启知识库功能
+    # Per-skill runtime config. Nested keys are flattened to env vars at startup
+    # using the rule: skill[<name>][<key>] -> SKILL_<NAME>_<KEY>
+    # (e.g. skill["image-generation"].model -> SKILL_IMAGE_GENERATION_MODEL).
+    "skill": {},
 }
 
 
@@ -378,12 +384,16 @@ def load_config():
         "gemini_api_base": "GEMINI_API_BASE",
         "minimax_api_key": "MINIMAX_API_KEY",
         "minimax_api_base": "MINIMAX_API_BASE",
+        "deepseek_api_key": "DEEPSEEK_API_KEY",
+        "deepseek_api_base": "DEEPSEEK_API_BASE",
         "zhipu_ai_api_key": "ZHIPU_AI_API_KEY",
         "zhipu_ai_api_base": "ZHIPU_AI_API_BASE",
         "moonshot_api_key": "MOONSHOT_API_KEY",
         "moonshot_api_base": "MOONSHOT_API_BASE",
         "ark_api_key": "ARK_API_KEY",
         "ark_api_base": "ARK_API_BASE",
+        "dashscope_api_key": "DASHSCOPE_API_KEY",
+        "dashscope_api_base": "DASHSCOPE_API_BASE",
         # Channel credentials (used by skills that check env vars)
         "feishu_app_id": "FEISHU_APP_ID",
         "feishu_app_secret": "FEISHU_APP_SECRET",
@@ -404,10 +414,43 @@ def load_config():
             if val:
                 os.environ[env_key] = str(val)
                 injected += 1
+
+    injected += _sync_skill_config_to_env(config.get("skill", {}))
+
     if injected:
         logger.info("[INIT] Synced {} config values to environment variables".format(injected))
 
     config.load_user_datas()
+
+
+def _sync_skill_config_to_env(skill_section) -> int:
+    """Flatten skill-namespaced config into environment variables.
+
+    Mapping rule: ``config["skill"][<name>][<key>]`` -> ``SKILL_<NAME>_<KEY>``
+    (e.g. ``skill["image-generation"].model`` -> ``SKILL_IMAGE_GENERATION_MODEL``).
+
+    This lets subprocess-based skill scripts read their own settings without
+    importing project code. Existing env vars are NOT overwritten so the
+    real environment always wins.
+
+    Returns the number of variables actually injected.
+    """
+    if not isinstance(skill_section, dict):
+        return 0
+    injected = 0
+    for skill_name, skill_conf in skill_section.items():
+        if not isinstance(skill_conf, dict):
+            continue
+        name_part = str(skill_name).replace("-", "_").upper()
+        for key, val in skill_conf.items():
+            if val is None or val == "":
+                continue
+            env_key = "SKILL_{}_{}".format(name_part, str(key).upper())
+            if env_key in os.environ:
+                continue
+            os.environ[env_key] = str(val)
+            injected += 1
+    return injected
 
 
 def get_root():

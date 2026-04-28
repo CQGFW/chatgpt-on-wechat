@@ -167,13 +167,15 @@ class AgentLLMModel(LLMModel):
                 if session_id:
                     kwargs['session_id'] = session_id
 
-                # Determine thinking: respect global config, then channel_type
+                # Thinking mode is a global toggle independent of the channel.
+                # IM channels (WeChat/WeCom/DingTalk/Feishu) won't render the
+                # reasoning trace, but still benefit from the higher answer
+                # quality the thinking pass produces.
                 from config import conf
-                global_thinking = conf().get("enable_thinking", True)
-                if not global_thinking:
-                    kwargs['thinking'] = {"type": "disabled"}
-                else:
-                    kwargs['thinking'] = {"type": "enabled"} if channel_type == "web" else {"type": "disabled"}
+                kwargs['thinking'] = (
+                    {"type": "enabled"} if conf().get("enable_thinking", False)
+                    else {"type": "disabled"}
+                )
 
                 response = self.bot.call_with_tools(**kwargs)
                 return self._format_response(response)
@@ -220,13 +222,15 @@ class AgentLLMModel(LLMModel):
                 if session_id:
                     kwargs['session_id'] = session_id
 
-                # Determine thinking: respect global config, then channel_type
+                # Thinking mode is a global toggle independent of the channel.
+                # IM channels (WeChat/WeCom/DingTalk/Feishu) won't render the
+                # reasoning trace, but still benefit from the higher answer
+                # quality the thinking pass produces.
                 from config import conf
-                global_thinking = conf().get("enable_thinking", True)
-                if not global_thinking:
-                    kwargs['thinking'] = {"type": "disabled"}
-                else:
-                    kwargs['thinking'] = {"type": "enabled"} if channel_type == "web" else {"type": "disabled"}
+                kwargs['thinking'] = (
+                    {"type": "enabled"} if conf().get("enable_thinking", False)
+                    else {"type": "disabled"}
+                )
 
                 stream = self.bot.call_with_tools(**kwargs)
                 
@@ -446,7 +450,7 @@ class AgentBridge:
                         except Exception as e:
                             logger.warning(f"[AgentBridge] Failed to clear DB after recovery: {e}")
             
-            # Check if there are files to send (from read tool)
+            # Check if there are files to send (from send/read tool)
             if hasattr(agent, 'stream_executor') and hasattr(agent.stream_executor, 'files_to_send'):
                 files_to_send = agent.stream_executor.files_to_send
                 if files_to_send:
@@ -608,17 +612,54 @@ class AgentBridge:
             from config import conf
             if not conf().get("conversation_persistence", True):
                 return
+            # When deep-thinking display is disabled, strip "thinking" content
+            # blocks before persisting so they don't resurface on history reload.
+            # The in-memory message list keeps them intact for this run's
+            # multi-turn LLM context.
+            thinking_enabled = bool(conf().get("enable_thinking", False))
         except Exception:
-            pass
+            thinking_enabled = False
+
+        messages_to_store = new_messages
+        if not thinking_enabled:
+            messages_to_store = self._strip_thinking_blocks(new_messages)
+
         try:
             from agent.memory import get_conversation_store
             get_conversation_store().append_messages(
-                session_id, new_messages, channel_type=channel_type
+                session_id, messages_to_store, channel_type=channel_type
             )
         except Exception as e:
             logger.warning(
                 f"[AgentBridge] Failed to persist messages for session={session_id}: {e}"
             )
+
+    @staticmethod
+    def _strip_thinking_blocks(messages: list) -> list:
+        """Return a shallow copy of messages with assistant "thinking" blocks removed."""
+        cleaned = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                cleaned.append(msg)
+                continue
+            if msg.get("role") != "assistant":
+                cleaned.append(msg)
+                continue
+            content = msg.get("content")
+            if not isinstance(content, list):
+                cleaned.append(msg)
+                continue
+            filtered_blocks = [
+                b for b in content
+                if not (isinstance(b, dict) and b.get("type") == "thinking")
+            ]
+            if len(filtered_blocks) == len(content):
+                cleaned.append(msg)
+            else:
+                new_msg = dict(msg)
+                new_msg["content"] = filtered_blocks
+                cleaned.append(new_msg)
+        return cleaned
 
     def clear_session(self, session_id: str):
         """

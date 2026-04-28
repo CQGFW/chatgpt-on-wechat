@@ -38,7 +38,7 @@ const I18N = {
         config_max_tokens: '最大上下文 Token', config_max_tokens_hint: '对话中 Agent 能输入的最大 Token 长度，超过后会智能压缩处理',
         config_max_turns: '最大记忆轮次', config_max_turns_hint: '一问一答为一轮，超过后会智能压缩处理',
         config_max_steps: '最大执行步数', config_max_steps_hint: '单次对话中 Agent 最多调用工具的次数',
-        config_enable_thinking: '深度思考', config_enable_thinking_hint: '启用后在 Web 端展示模型推理过程',
+        config_enable_thinking: '深度思考', config_enable_thinking_hint: '是否启用深度思考模式',
         config_channel_type: '通道类型',
         config_provider: '模型厂商', config_model_name: '模型',
         config_custom_model_hint: '输入自定义模型名称',
@@ -124,7 +124,7 @@ const I18N = {
         config_max_tokens: 'Max Context Tokens', config_max_tokens_hint: 'Max tokens the Agent can input per conversation, auto-compressed when exceeded',
         config_max_turns: 'Max Memory Turns', config_max_turns_hint: 'One Q&A pair = one turn, auto-compressed when exceeded',
         config_max_steps: 'Max Steps', config_max_steps_hint: 'Max tool calls the Agent can make in a single conversation',
-        config_enable_thinking: 'Deep Thinking', config_enable_thinking_hint: 'Show model reasoning on web console',
+        config_enable_thinking: 'Deep Thinking', config_enable_thinking_hint: 'Enable deep thinking mode',
         config_channel_type: 'Channel Type',
         config_provider: 'Provider', config_model_name: 'Model',
         config_custom_model_hint: 'Enter custom model name',
@@ -204,6 +204,7 @@ function applyI18n() {
     document.querySelectorAll('[data-tip-key]').forEach(el => {
         el.setAttribute('data-tooltip', t(el.dataset.tipKey));
     });
+    installCfgTipPortal();
     const langLabel = document.getElementById('lang-label');
     if (langLabel) langLabel.textContent = currentLang === 'zh' ? '中文' : 'EN';
 }
@@ -213,6 +214,54 @@ function toggleLanguage() {
     localStorage.setItem('cow_lang', currentLang);
     applyI18n();
     _applyInputTooltips();
+}
+
+// Floating tooltip portal for [data-tip-key] elements. Tooltip nodes are
+// appended to <body> so they aren't clipped by overflow:hidden ancestors
+// (e.g. the config panel's scroll container).
+let _cfgTipPortalEl = null;
+let _cfgTipPortalInstalled = false;
+function installCfgTipPortal() {
+    if (_cfgTipPortalInstalled) return;
+    _cfgTipPortalInstalled = true;
+
+    const showTip = (target) => {
+        const text = target.getAttribute('data-tooltip');
+        if (!text) return;
+        if (!_cfgTipPortalEl) {
+            _cfgTipPortalEl = document.createElement('div');
+            _cfgTipPortalEl.className = 'cfg-tip-floating';
+            document.body.appendChild(_cfgTipPortalEl);
+        }
+        _cfgTipPortalEl.textContent = text;
+        const rect = target.getBoundingClientRect();
+        // Render once to measure, then position above the target, centered.
+        _cfgTipPortalEl.style.left = '0px';
+        _cfgTipPortalEl.style.top = '0px';
+        _cfgTipPortalEl.classList.add('show');
+        const tipRect = _cfgTipPortalEl.getBoundingClientRect();
+        let left = rect.left + rect.width / 2 - tipRect.width / 2;
+        // Clamp horizontally to the viewport with an 8px gutter.
+        left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+        const top = rect.top - tipRect.height - 6;
+        _cfgTipPortalEl.style.left = left + 'px';
+        _cfgTipPortalEl.style.top = top + 'px';
+    };
+    const hideTip = () => {
+        if (_cfgTipPortalEl) _cfgTipPortalEl.classList.remove('show');
+    };
+
+    document.addEventListener('mouseover', (e) => {
+        const target = e.target.closest('[data-tip-key]');
+        if (target) showTip(target);
+    });
+    document.addEventListener('mouseout', (e) => {
+        const target = e.target.closest('[data-tip-key]');
+        if (target) hideTip();
+    });
+    // Hide on scroll/resize so the tooltip doesn't drift away from its anchor.
+    window.addEventListener('scroll', hideTip, true);
+    window.addEventListener('resize', hideTip);
 }
 
 // =====================================================================
@@ -339,16 +388,57 @@ function createMd() {
 const md = createMd();
 
 const VIDEO_EXT_RE = /\.(?:mp4|webm|mov|avi|mkv)$/i;  // tested against URL without query string
+const IMAGE_EXT_RE = /\.(?:jpg|jpeg|png|gif|webp|bmp|svg)$/i;  // tested against URL without query string
+
+function _toWebUrl(url) {
+    if (/^\/[A-Za-z]/.test(url) && !url.startsWith('/api/')) {
+        return '/api/file?path=' + encodeURIComponent(url);
+    }
+    if (/^file:\/\/\//i.test(url)) {
+        return '/api/file?path=' + encodeURIComponent(url.replace(/^file:\/\/\//i, '/'));
+    }
+    return url;
+}
 
 function _buildVideoHtml(url) {
+    const webUrl = _toWebUrl(url);
     const fileName = url.split('/').pop().split('?')[0];
     return `<div style="margin:10px 0;">` +
         `<video controls preload="metadata" ` +
         `style="max-width:100%;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.15);display:block;">` +
-        `<source src="${url}"></video>` +
-        `<a href="${url}" target="_blank" ` +
+        `<source src="${webUrl}"></video>` +
+        `<a href="${webUrl}" target="_blank" ` +
         `style="display:inline-flex;align-items:center;gap:4px;margin-top:4px;font-size:12px;color:#8b8fa8;text-decoration:none;">` +
         `<i class="fas fa-download"></i> ${escapeHtml(fileName)}</a></div>`;
+}
+
+function _openImageLightbox(src) {
+    let overlay = document.getElementById('cow-lightbox');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'cow-lightbox';
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;cursor:zoom-out;opacity:0;transition:opacity .2s';
+        overlay.onclick = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.style.display = 'none', 200); };
+        const img = document.createElement('img');
+        img.id = 'cow-lightbox-img';
+        img.style.cssText = 'max-width:92vw;max-height:92vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.5);object-fit:contain;';
+        img.onclick = (e) => e.stopPropagation();
+        overlay.appendChild(img);
+        document.body.appendChild(overlay);
+    }
+    overlay.querySelector('#cow-lightbox-img').src = src;
+    overlay.style.display = 'flex';
+    requestAnimationFrame(() => overlay.style.opacity = '1');
+}
+
+function _buildImageHtml(url) {
+    const webUrl = _toWebUrl(url);
+    const safeUrl = webUrl.replace(/"/g, '&quot;');
+    return `<div style="margin:10px 0;">` +
+        `<img src="${safeUrl}" alt="image" loading="lazy" ` +
+        `onclick="_openImageLightbox(this.src)" ` +
+        `style="max-width:520px;width:100%;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.15);display:block;cursor:zoom-in;">` +
+        `</div>`;
 }
 
 function injectVideoPlayers(html) {
@@ -369,10 +459,43 @@ function injectVideoPlayers(html) {
     }).join('');
 }
 
+// Convert image URLs into inline <img> previews. Mirrors injectVideoPlayers but for images.
+// Handles three cases produced by markdown-it:
+//   1. <a href="...image.jpg">...</a>  (bare URL or autolink that linkify turned into an anchor)
+//   2. <img src="...">                  (markdown image syntax) — leave as-is, but normalize style
+//   3. raw URL still present in a text node                    — only as a safety net
+function injectImagePreviews(html) {
+    // Step 1: anchor whose href points to an image file -> replace with <img> preview.
+    const step1 = html.replace(
+        /<a\s+href="(https?:\/\/[^"]+)"[^>]*>[^<]*<\/a>/gi,
+        (match, url) => IMAGE_EXT_RE.test(url.split('?')[0]) ? _buildImageHtml(url) : match
+    );
+    // Step 2: bare image URLs left in text nodes (rare — markdown-it's linkify usually catches them).
+    return step1.split(/(<[^>]+>)/).map((chunk, idx) => {
+        if (idx % 2 !== 0) return chunk;
+        return chunk.replace(/https?:\/\/\S+/gi, (url) => {
+            const bare = url.replace(/[),.\s]+$/, '');
+            return IMAGE_EXT_RE.test(bare.split('?')[0]) ? _buildImageHtml(bare) : url;
+        });
+    }).join('');
+}
+
+function _rewriteLocalImgSrc(html) {
+    return html.replace(/<img\s([^>]*?)src="([^"]+)"([^>]*?)>/gi, (match, pre, src, post) => {
+        const webSrc = _toWebUrl(src);
+        const safeSrc = webSrc.replace(/"/g, '&quot;');
+        const hasClick = /onclick/i.test(pre + post);
+        const clickAttr = hasClick ? '' : ` onclick="_openImageLightbox(this.src)" style="cursor:zoom-in;"`;
+        return `<img ${pre}src="${safeSrc}"${post}${clickAttr}>`;
+    });
+}
+
 function renderMarkdown(text) {
     try {
-        const html = md.render(text);
-        return injectVideoPlayers(html);
+        let html = md.render(text);
+        html = _rewriteLocalImgSrc(html);
+        // Order matters: video first (more specific), then image.
+        return injectImagePreviews(injectVideoPlayers(html));
     }
     catch (e) { return text.replace(/\n/g, '<br>'); }
 }
@@ -429,6 +552,16 @@ const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 const messagesDiv = document.getElementById('chat-messages');
 const fileInput = document.getElementById('file-input');
+
+// Smart auto-scroll: pause when user scrolls up, resume when near bottom
+let _autoScrollEnabled = true;
+const _SCROLL_THRESHOLD = 80; // px from bottom to re-enable auto-scroll
+
+messagesDiv.addEventListener('scroll', () => {
+    const distFromBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight;
+    _autoScrollEnabled = distFromBottom <= _SCROLL_THRESHOLD;
+    _updateScrollToBottomBtn();
+});
 
 // Intercept internal navigation links in chat messages
 messagesDiv.addEventListener('click', (e) => {
@@ -984,17 +1117,60 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo) {
                     reasoningStartTime = Date.now();
                     currentReasoningEl = document.createElement('div');
                     currentReasoningEl.className = 'agent-step agent-thinking-step';
+                    // During streaming, use a <pre> with a single text node and
+                    // append-only updates. This avoids re-parsing markdown and
+                    // re-setting innerHTML on every chunk, which is what causes
+                    // the page to crash on long chains-of-thought.
                     currentReasoningEl.innerHTML = `
                         <div class="thinking-header" onclick="this.parentElement.classList.toggle('expanded')">
                             <i class="fas fa-lightbulb text-amber-400 flex-shrink-0"></i>
                             <span class="thinking-summary">${t('thinking_in_progress')}</span>
                             <i class="fas fa-chevron-right thinking-chevron"></i>
                         </div>
-                        <div class="thinking-full"></div>`;
+                        <div class="thinking-full"><pre class="thinking-stream-pre"></pre></div>`;
                     stepsEl.appendChild(currentReasoningEl);
+                    const preEl = currentReasoningEl.querySelector('.thinking-stream-pre');
+                    preEl.appendChild(document.createTextNode(''));
+                    currentReasoningEl._streamTextNode = preEl.firstChild;
+                    currentReasoningEl._streamPendingText = '';
+                    currentReasoningEl._streamRafScheduled = false;
+                    currentReasoningEl._streamCharsRendered = 0;
+                    currentReasoningEl._streamCapped = false;
                 }
-                currentReasoningEl.querySelector('.thinking-full').innerHTML = renderMarkdown(reasoningText);
-                scrollChatToBottom();
+                // Hard cap: once REASONING_RENDER_CAP chars are in the DOM, stop
+                // appending further deltas. The full text is still kept in
+                // `reasoningText` for finalize-time head+tail rendering.
+                if (!currentReasoningEl._streamCapped) {
+                    currentReasoningEl._streamPendingText += item.content;
+                    if (!currentReasoningEl._streamRafScheduled) {
+                        currentReasoningEl._streamRafScheduled = true;
+                        const elRef = currentReasoningEl;
+                        requestAnimationFrame(() => {
+                            elRef._streamRafScheduled = false;
+                            if (!elRef.isConnected || !elRef._streamTextNode) return;
+                            let pending = elRef._streamPendingText;
+                            elRef._streamPendingText = '';
+                            if (!pending) return;
+                            const remaining = REASONING_RENDER_CAP - elRef._streamCharsRendered;
+                            if (remaining <= 0) {
+                                elRef._streamCapped = true;
+                            } else {
+                                if (pending.length > remaining) {
+                                    pending = pending.slice(0, remaining);
+                                    elRef._streamCapped = true;
+                                }
+                                elRef._streamTextNode.appendData(pending);
+                                elRef._streamCharsRendered += pending.length;
+                                if (elRef._streamCapped) {
+                                    elRef._streamTextNode.appendData(
+                                        '\n\n... [reasoning truncated for display] ...'
+                                    );
+                                }
+                            }
+                            scrollChatToBottom();
+                        });
+                    }
+                }
 
             } else if (item.type === 'delta') {
                 ensureBotEl();
@@ -1081,8 +1257,8 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo) {
                 const imgEl = document.createElement('img');
                 imgEl.src = item.content;
                 imgEl.alt = 'screenshot';
-                imgEl.style.cssText = 'max-width:600px;border-radius:8px;margin:8px 0;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.1);';
-                imgEl.onclick = () => window.open(item.content, '_blank');
+                imgEl.style.cssText = 'max-width:600px;border-radius:8px;margin:8px 0;cursor:zoom-in;box-shadow:0 1px 4px rgba(0,0,0,0.1);';
+                imgEl.onclick = () => _openImageLightbox(imgEl.src);
                 mediaEl.appendChild(imgEl);
                 scrollChatToBottom();
 
@@ -1292,11 +1468,41 @@ function renderToolCallsHtml(toolCalls) {
     }).join('');
 }
 
+// Cap for rendering reasoning content in the bubble. Beyond this size,
+// we skip markdown rendering entirely and show plain text head + tail to
+// keep the page responsive (very long chains-of-thought can otherwise
+// stall or crash the browser when re-parsed by marked.js).
+// Keep this in sync with backend MAX_STORED_REASONING_CHARS and
+// MAX_REASONING_STREAM_CHARS so storage / SSE / display stay aligned.
+const REASONING_RENDER_CAP = 4 * 1024; // 4 KB
+
+function _truncateReasoningForDisplay(text) {
+    if (!text || text.length <= REASONING_RENDER_CAP) return { text, truncated: false, omitted: 0 };
+    const half = Math.floor(REASONING_RENDER_CAP / 2);
+    const head = text.slice(0, half);
+    const tail = text.slice(-half);
+    return {
+        text: head + '\n\n... [' + (text.length - head.length - tail.length) + ' chars omitted] ...\n\n' + tail,
+        truncated: true,
+        omitted: text.length - head.length - tail.length,
+    };
+}
+
+function _renderReasoningBody(text) {
+    // For short reasoning, render as markdown. For long ones, fall back to
+    // an escaped <pre> block to avoid expensive markdown parsing.
+    const { text: shown, truncated } = _truncateReasoningForDisplay(text);
+    if (truncated || shown.length > REASONING_RENDER_CAP) {
+        return '<pre class="thinking-stream-pre">' + escapeHtml(shown) + '</pre>';
+    }
+    return renderMarkdown(shown);
+}
+
 function finalizeThinking(el, startTime, text) {
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     el.querySelector('.thinking-summary').textContent = t('thinking_done');
     const fullDiv = el.querySelector('.thinking-full');
-    fullDiv.innerHTML = `<div class="thinking-duration">${t('thinking_duration')} ${elapsed}s</div>` + renderMarkdown(text);
+    fullDiv.innerHTML = `<div class="thinking-duration">${t('thinking_duration')} ${elapsed}s</div>` + _renderReasoningBody(text);
 }
 
 function renderThinkingHtml(text) {
@@ -1309,7 +1515,7 @@ function renderThinkingHtml(text) {
         <span class="thinking-summary">${t('thinking_done')}</span>
         <i class="fas fa-chevron-right thinking-chevron"></i>
     </div>
-    <div class="thinking-full">${renderMarkdown(full)}</div>
+    <div class="thinking-full">${_renderReasoningBody(full)}</div>
 </div>`;
 }
 
@@ -1356,9 +1562,38 @@ function renderStepsHtml(steps) {
         </div>` : ''}
     </div>
 </div>`;
+            // If this tool sent a file (send/read tool), render the media inline
+            // so it persists across page refreshes (SSE-only file events are not stored).
+            const mediaHtml = _renderSentFileFromToolResult(step);
+            if (mediaHtml) html += mediaHtml;
         }
     }
     return { stepsHtml: html, lastContentText };
+}
+
+// Extract file-to-send metadata from a tool's result and render an inline preview.
+// Returns '' if the result isn't a file_to_send payload.
+function _renderSentFileFromToolResult(step) {
+    if (!step || !step.result) return '';
+    let payload;
+    try {
+        payload = typeof step.result === 'string' ? JSON.parse(step.result) : step.result;
+    } catch (_) { return ''; }
+    if (!payload || payload.type !== 'file_to_send' || !payload.path) return '';
+    const webUrl = _toWebUrl(payload.path);
+    const fileType = payload.file_type || 'file';
+    const fileName = payload.file_name || payload.path.split('/').pop();
+    if (fileType === 'image') {
+        return `<div class="agent-step">${_buildImageHtml(webUrl)}</div>`;
+    }
+    if (fileType === 'video') {
+        return `<div class="agent-step">${_buildVideoHtml(webUrl)}</div>`;
+    }
+    return `<div class="agent-step"><a href="${webUrl}" download="${escapeHtml(fileName)}" target="_blank" ` +
+        `style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;margin:8px 0;border-radius:8px;` +
+        `background:var(--bg-secondary,#f3f4f6);color:var(--text-primary,#374151);text-decoration:none;font-size:14px;` +
+        `border:1px solid var(--border-color,#e5e7eb);">` +
+        `<i class="fas fa-file-download" style="color:#6b7280;"></i> ${escapeHtml(fileName)}</a></div>`;
 }
 
 function createBotMessageEl(content, timestamp, requestId, msg) {
@@ -1406,7 +1641,8 @@ function createBotMessageEl(content, timestamp, requestId, msg) {
 function addUserMessage(content, timestamp, attachments) {
     const el = createUserMessageEl(content, timestamp, attachments);
     messagesDiv.appendChild(el);
-    scrollChatToBottom();
+    _autoScrollEnabled = true;
+    scrollChatToBottom(true);
 }
 
 function addBotMessage(content, timestamp, requestId) {
@@ -1499,7 +1735,7 @@ function loadHistory(page) {
             if (isFirstLoad) {
                 // Use requestAnimationFrame to ensure the DOM has fully rendered
                 // before scrolling, otherwise scrollHeight may not reflect new content.
-                requestAnimationFrame(() => scrollChatToBottom());
+                requestAnimationFrame(() => scrollChatToBottom(true));
             } else {
                 // Restore scroll position so loading older messages doesn't jump the view
                 messagesDiv.scrollTop = messagesDiv.scrollHeight - prevScrollHeight;
@@ -2017,8 +2253,17 @@ function formatToolArgs(args) {
     }
 }
 
-function scrollChatToBottom() {
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+function scrollChatToBottom(force) {
+    if (force || _autoScrollEnabled) {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+}
+
+function _updateScrollToBottomBtn() {
+    const btn = document.getElementById('scroll-to-bottom-btn');
+    if (!btn) return;
+    const distFromBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight;
+    btn.classList.toggle('hidden', distFromBottom <= _SCROLL_THRESHOLD);
 }
 
 function applyHighlighting(container) {
@@ -2116,7 +2361,7 @@ function initConfigView(data) {
     document.getElementById('cfg-max-tokens').value = data.agent_max_context_tokens || 50000;
     document.getElementById('cfg-max-turns').value = data.agent_max_context_turns || 20;
     document.getElementById('cfg-max-steps').value = data.agent_max_steps || 20;
-    document.getElementById('cfg-enable-thinking').checked = data.enable_thinking !== false;
+    document.getElementById('cfg-enable-thinking').checked = data.enable_thinking === true;
 
     const pwdInput = document.getElementById('cfg-password');
     const maskedPwd = data.web_password_masked || '';
@@ -2211,12 +2456,17 @@ function onProviderChange(pid) {
     }
 
     // API Base
+    const apiBaseInput = document.getElementById('cfg-api-base');
     if (p.api_base_key) {
         document.getElementById('cfg-api-base-wrap').classList.remove('hidden');
-        document.getElementById('cfg-api-base').value = configApiBases[p.api_base_key] || p.api_base_default || '';
+        apiBaseInput.value = configApiBases[p.api_base_key] || p.api_base_default || '';
+        // Hint the version-path tail (e.g. /v1) so users are reminded to
+        // include it themselves. We don't auto-rewrite anything server-side.
+        apiBaseInput.placeholder = p.api_base_placeholder || 'https://...';
     } else {
         document.getElementById('cfg-api-base-wrap').classList.add('hidden');
-        document.getElementById('cfg-api-base').value = '';
+        apiBaseInput.value = '';
+        apiBaseInput.placeholder = 'https://...';
     }
 
     onModelSelectChange(modelOpts[0] ? modelOpts[0].value : '');
@@ -3565,6 +3815,7 @@ navigateTo = function(viewId) {
 // Knowledge View
 // =====================================================================
 let _knowledgeTreeData = [];
+let _knowledgeRootFiles = [];
 let _knowledgeCurrentFile = null;
 let _knowledgeGraphLoaded = false;
 
@@ -3582,7 +3833,9 @@ function loadKnowledgeView() {
         const statsEl = document.getElementById('knowledge-stats');
 
         const tree = data.tree || [];
+        const rootFiles = data.root_files || [];
         _knowledgeTreeData = tree;
+        _knowledgeRootFiles = rootFiles;
         const stats = data.stats || {};
         const totalPages = stats.pages || 0;
         const sizeStr = stats.size < 1024 ? stats.size + ' B' : (stats.size / 1024).toFixed(1) + ' KB';
@@ -3600,14 +3853,17 @@ function loadKnowledgeView() {
         emptyEl.classList.add('hidden');
         docsPanel.classList.remove('hidden');
 
-        renderKnowledgeTree(tree);
+        renderKnowledgeTree(tree, rootFiles);
 
         // Auto-select the first file (desktop only)
         if (window.innerWidth >= 768) {
-            const firstGroup = tree.find(g => g.files && g.files.length > 0);
-            if (firstGroup) {
-                const firstFile = firstGroup.files[0];
-                openKnowledgeFile(firstGroup.dir + '/' + firstFile.name, firstFile.title);
+            const firstFile = rootFiles.length > 0 ? rootFiles[0] : null;
+            const firstGroup = !firstFile ? tree.find(g => g.files && g.files.length > 0) : null;
+            if (firstFile) {
+                openKnowledgeFile(firstFile.name, firstFile.title);
+            } else if (firstGroup) {
+                const gf = firstGroup.files[0];
+                openKnowledgeFile(firstGroup.dir + '/' + gf.name, gf.title);
             }
         } else {
             document.getElementById('knowledge-content-placeholder').classList.add('hidden');
@@ -3616,10 +3872,26 @@ function loadKnowledgeView() {
     }).catch(() => {});
 }
 
-function renderKnowledgeTree(tree, filter) {
+function renderKnowledgeTree(tree, rootFilesOrFilter, filter) {
     const container = document.getElementById('knowledge-tree');
     container.innerHTML = '';
-    const lowerFilter = (filter || '').toLowerCase();
+    let rootFiles, lowerFilter;
+    if (typeof rootFilesOrFilter === 'string') {
+        rootFiles = _knowledgeRootFiles;
+        lowerFilter = (rootFilesOrFilter || '').toLowerCase();
+    } else {
+        rootFiles = rootFilesOrFilter || _knowledgeRootFiles;
+        lowerFilter = (filter || '').toLowerCase();
+    }
+    (rootFiles || []).forEach(f => {
+        if (lowerFilter && !f.title.toLowerCase().includes(lowerFilter) && !f.name.toLowerCase().includes(lowerFilter)) return;
+        const fbtn = document.createElement('button');
+        fbtn.className = 'knowledge-tree-file' + (_knowledgeCurrentFile === f.name ? ' active' : '');
+        fbtn.dataset.path = f.name;
+        fbtn.innerHTML = `<i class="fas fa-file-lines text-[10px] text-slate-400"></i><span class="truncate">${escapeHtml(f.title)}</span>`;
+        fbtn.onclick = () => openKnowledgeFile(f.name, f.title);
+        container.appendChild(fbtn);
+    });
     _renderKnowledgeGroups(container, tree, '', lowerFilter, 0);
 }
 
@@ -3684,7 +3956,7 @@ function _countFiles(group) {
 }
 
 function filterKnowledgeTree(query) {
-    renderKnowledgeTree(_knowledgeTreeData, query);
+    renderKnowledgeTree(_knowledgeTreeData, _knowledgeRootFiles, query);
 }
 
 function resolveKnowledgePath(currentFilePath, relativeHref) {
@@ -3763,6 +4035,9 @@ function bindChatKnowledgeLinks(container) {
 }
 
 function _findKnowledgeFileByName(filename) {
+    for (const f of _knowledgeRootFiles) {
+        if (f.name === filename) return { path: f.name, title: f.title };
+    }
     return _searchFileInGroups(_knowledgeTreeData, '', filename);
 }
 
@@ -4099,7 +4374,10 @@ function initApp() {
     _restoreSessionPanel();
 
     fetch('/api/knowledge/list').then(r => r.json()).then(data => {
-        if (data.status === 'success') _knowledgeTreeData = data.tree || [];
+        if (data.status === 'success') {
+            _knowledgeTreeData = data.tree || [];
+            _knowledgeRootFiles = data.root_files || [];
+        }
     }).catch(() => {});
 
     fetch('/api/version').then(r => r.json()).then(data => {

@@ -208,9 +208,24 @@ class WebChannel(ChatChannel):
 
             # Fallback: polling mode
             if session_id in self.session_queues:
+                content = reply.content if reply.content is not None else ""
+                # Skip file:// IMAGE_URL/FILE replies originating from an SSE-enabled
+                # request: they were already pushed via the `file_to_send` event during
+                # agent execution. By the time the chat_channel sends the IMAGE_URL reply,
+                # the SSE stream has typically closed (after the text "done") and the
+                # request_id is gone from sse_queues, so we'd otherwise duplicate the file
+                # as a polling bubble. Scheduler/push tasks have no on_event and must
+                # still go through polling normally.
+                if (
+                    reply.type in (ReplyType.IMAGE_URL, ReplyType.FILE)
+                    and content.startswith("file://")
+                    and context.get("on_event") is not None
+                ):
+                    logger.debug(f"Polling skipped duplicate file reply for session {session_id}")
+                    return
                 response_data = {
                     "type": str(reply.type),
-                    "content": reply.content,
+                    "content": content,
                     "timestamp": time.time(),
                     "request_id": request_id
                 }
@@ -225,6 +240,17 @@ class WebChannel(ChatChannel):
     def _make_sse_callback(self, request_id: str):
         """Build an on_event callback that pushes agent stream events into the SSE queue."""
 
+        # Cap reasoning bytes pushed to the frontend per request to avoid
+        # browser stalls / crashes on very long chains-of-thought. Anything
+        # beyond the cap is dropped from the stream (DB still persists a
+        # truncated copy via _truncate_reasoning_for_storage).
+        # Keep aligned with frontend REASONING_RENDER_CAP and backend
+        # MAX_STORED_REASONING_CHARS.
+        MAX_REASONING_STREAM_CHARS = 4 * 1024  # 4 KB
+        # Use a single-element list as a mutable counter accessible from closure.
+        reasoning_chars_sent = [0]
+        reasoning_capped_notified = [False]
+
         def on_event(event: dict):
             if request_id not in self.sse_queues:
                 return
@@ -234,8 +260,21 @@ class WebChannel(ChatChannel):
 
             if event_type == "reasoning_update":
                 delta = data.get("delta", "")
-                if delta:
-                    q.put({"type": "reasoning", "content": delta})
+                if not delta:
+                    return
+                remaining = MAX_REASONING_STREAM_CHARS - reasoning_chars_sent[0]
+                if remaining <= 0:
+                    if not reasoning_capped_notified[0]:
+                        reasoning_capped_notified[0] = True
+                        q.put({
+                            "type": "reasoning",
+                            "content": "\n\n... [reasoning truncated for display] ...",
+                        })
+                    return
+                if len(delta) > remaining:
+                    delta = delta[:remaining]
+                reasoning_chars_sent[0] += len(delta)
+                q.put({"type": "reasoning", "content": delta})
 
             elif event_type == "message_update":
                 delta = data.get("delta", "")
@@ -268,6 +307,25 @@ class WebChannel(ChatChannel):
                 tool_calls = data.get("tool_calls", [])
                 if tool_calls:
                     q.put({"type": "message_end", "has_tool_calls": True})
+
+            elif event_type == "agent_end":
+                # Safety net: if the agent finishes with an empty final_response,
+                # chat_channel skips _send_reply (because reply.content is empty),
+                # which means no "done" event is ever emitted and the SSE stream
+                # would hang until the 10-min idle timeout. Push a fallback "done"
+                # here so the frontend always gets closure.
+                final_response = data.get("final_response", "")
+                if not final_response or not str(final_response).strip():
+                    logger.warning(
+                        f"[WebChannel] agent_end with empty final_response for "
+                        f"request {request_id}, sending fallback done"
+                    )
+                    q.put({
+                        "type": "done",
+                        "content": "(模型未返回任何内容，请重试或换一种方式描述你的需求)",
+                        "request_id": request_id,
+                        "timestamp": time.time(),
+                    })
 
             elif event_type == "file_to_send":
                 file_path = data.get("path", "")
@@ -712,65 +770,58 @@ class ChatHandler:
 class ConfigHandler:
 
     _RECOMMENDED_MODELS = [
-        const.MINIMAX_M2_7, const.MINIMAX_M2_5, const.MINIMAX_M2_1, const.MINIMAX_M2_1_LIGHTNING,
-        const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7,
-        const.QWEN36_PLUS, const.QWEN35_PLUS, const.QWEN3_MAX,
-        const.KIMI_K2_5, const.KIMI_K2,
-        const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE,
-        const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS, const.CLAUDE_4_5_SONNET,
+        const.DEEPSEEK_V4_FLASH, const.DEEPSEEK_V4_PRO, const.DEEPSEEK_CHAT, const.DEEPSEEK_REASONER,
+        const.MINIMAX_M2_7_HIGHSPEED, const.MINIMAX_M2_7, const.MINIMAX_M2_5, const.MINIMAX_M2_1, const.MINIMAX_M2_1_LIGHTNING,
+        const.CLAUDE_4_6_SONNET, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_OPUS, const.CLAUDE_4_5_SONNET,
         const.GEMINI_31_FLASH_LITE_PRE, const.GEMINI_31_PRO_PRE, const.GEMINI_3_FLASH_PRE,
         const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o,
-        const.DEEPSEEK_CHAT, const.DEEPSEEK_REASONER,
+        const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7,
+        const.QWEN36_PLUS, const.QWEN35_PLUS, const.QWEN3_MAX,
+        const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE,
+        const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2,
     ]
 
+    # Generic placeholder hints surfaced in the web console. We deliberately
+    # show the version-path tail (e.g. "/v1") so users are reminded to type
+    # the full base URL. The form is intentionally vague (`...../v1`) so it
+    # never looks like a real default a user might paste verbatim — and we
+    # never auto-rewrite anything on the server side.
+    _PLACEHOLDER_V1 = "https://...../v1"
+    _PLACEHOLDER_ZHIPU = "https://...../api/paas/v4"
+    _PLACEHOLDER_DOUBAO = "https://...../api/v3"
+    _PLACEHOLDER_GEMINI = "https://....."
+
     PROVIDER_MODELS = OrderedDict([
+        ("deepseek", {
+            "label": "DeepSeek",
+            "api_key_field": "deepseek_api_key",
+            "api_base_key": "deepseek_api_base",
+            "api_base_default": "https://api.deepseek.com/v1",
+            "api_base_placeholder": _PLACEHOLDER_V1,
+            "models": [const.DEEPSEEK_V4_FLASH, const.DEEPSEEK_V4_PRO, const.DEEPSEEK_CHAT, const.DEEPSEEK_REASONER],
+        }),
         ("minimax", {
             "label": "MiniMax",
             "api_key_field": "minimax_api_key",
             "api_base_key": None,
             "api_base_default": None,
+            "api_base_placeholder": "",
             "models": [const.MINIMAX_M2_7, const.MINIMAX_M2_7_HIGHSPEED, const.MINIMAX_M2_5, const.MINIMAX_M2_1, const.MINIMAX_M2_1_LIGHTNING],
-        }),
-        ("zhipu", {
-            "label": "智谱AI",
-            "api_key_field": "zhipu_ai_api_key",
-            "api_base_key": "zhipu_ai_api_base",
-            "api_base_default": "https://open.bigmodel.cn/api/paas/v4",
-            "models": [const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7],
-        }),
-        ("dashscope", {
-            "label": "通义千问",
-            "api_key_field": "dashscope_api_key",
-            "api_base_key": None,
-            "api_base_default": None,
-            "models": [const.QWEN36_PLUS, const.QWEN35_PLUS, const.QWEN3_MAX],
-        }),
-        ("moonshot", {
-            "label": "Kimi",
-            "api_key_field": "moonshot_api_key",
-            "api_base_key": "moonshot_base_url",
-            "api_base_default": "https://api.moonshot.cn/v1",
-            "models": [const.KIMI_K2_5, const.KIMI_K2],
-        }),
-        ("doubao", {
-            "label": "豆包",
-            "api_key_field": "ark_api_key",
-            "api_base_key": "ark_base_url",
-            "api_base_default": "https://ark.cn-beijing.volces.com/api/v3",
-            "models": [const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE],
         }),
         ("claudeAPI", {
             "label": "Claude",
             "api_key_field": "claude_api_key",
             "api_base_key": "claude_api_base",
             "api_base_default": "https://api.anthropic.com/v1",
-            "models": [const.CLAUDE_4_6_SONNET, const.CLAUDE_4_6_OPUS, const.CLAUDE_4_5_SONNET],
+            "api_base_placeholder": _PLACEHOLDER_V1,
+            "models": [const.CLAUDE_4_6_SONNET, const.CLAUDE_4_7_OPUS, const.CLAUDE_4_6_OPUS, const.CLAUDE_4_5_SONNET],
         }),
         ("gemini", {
             "label": "Gemini",
             "api_key_field": "gemini_api_key",
             "api_base_key": "gemini_api_base",
             "api_base_default": "https://generativelanguage.googleapis.com",
+            "api_base_placeholder": _PLACEHOLDER_GEMINI,
             "models": [const.GEMINI_31_FLASH_LITE_PRE, const.GEMINI_31_PRO_PRE, const.GEMINI_3_FLASH_PRE],
         }),
         ("openai", {
@@ -778,20 +829,47 @@ class ConfigHandler:
             "api_key_field": "open_ai_api_key",
             "api_base_key": "open_ai_api_base",
             "api_base_default": "https://api.openai.com/v1",
+            "api_base_placeholder": _PLACEHOLDER_V1,
             "models": [const.GPT_54, const.GPT_54_MINI, const.GPT_54_NANO, const.GPT_5, const.GPT_41, const.GPT_4o],
         }),
-        ("deepseek", {
-            "label": "DeepSeek",
-            "api_key_field": "deepseek_api_key",
-            "api_base_key": "deepseek_api_base",
-            "api_base_default": "https://api.deepseek.com/v1",
-            "models": [const.DEEPSEEK_CHAT, const.DEEPSEEK_REASONER],
+        ("zhipu", {
+            "label": "智谱AI",
+            "api_key_field": "zhipu_ai_api_key",
+            "api_base_key": "zhipu_ai_api_base",
+            "api_base_default": "https://open.bigmodel.cn/api/paas/v4",
+            "api_base_placeholder": _PLACEHOLDER_ZHIPU,
+            "models": [const.GLM_5_1, const.GLM_5_TURBO, const.GLM_5, const.GLM_4_7],
+        }),
+        ("dashscope", {
+            "label": "通义千问",
+            "api_key_field": "dashscope_api_key",
+            "api_base_key": None,
+            "api_base_default": None,
+            "api_base_placeholder": "",
+            "models": [const.QWEN36_PLUS, const.QWEN35_PLUS, const.QWEN3_MAX],
+        }),
+        ("doubao", {
+            "label": "豆包",
+            "api_key_field": "ark_api_key",
+            "api_base_key": "ark_base_url",
+            "api_base_default": "https://ark.cn-beijing.volces.com/api/v3",
+            "api_base_placeholder": _PLACEHOLDER_DOUBAO,
+            "models": [const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE],
+        }),
+        ("moonshot", {
+            "label": "Kimi",
+            "api_key_field": "moonshot_api_key",
+            "api_base_key": "moonshot_base_url",
+            "api_base_default": "https://api.moonshot.cn/v1",
+            "api_base_placeholder": _PLACEHOLDER_V1,
+            "models": [const.KIMI_K2_6, const.KIMI_K2_5, const.KIMI_K2],
         }),
         ("modelscope", {
             "label": "ModelScope",
             "api_key_field": "modelscope_api_key",
             "api_base_key": None,
             "api_base_default": None,
+            "api_base_placeholder": "",
             "models": [const.QWEN3_5_27B, const.QWEN3_235B_A22B_INSTRUCT_2507],
         }),
         ("linkai", {
@@ -799,6 +877,7 @@ class ConfigHandler:
             "api_key_field": "linkai_api_key",
             "api_base_key": None,
             "api_base_default": None,
+            "api_base_placeholder": "",
             "models": _RECOMMENDED_MODELS,
         }),
         ("custom", {
@@ -806,6 +885,7 @@ class ConfigHandler:
             "api_key_field": "custom_api_key",
             "api_base_key": "custom_api_base",
             "api_base_default": "",
+            "api_base_placeholder": _PLACEHOLDER_V1,
             "models": [],
         }),
     ])
@@ -854,6 +934,7 @@ class ConfigHandler:
                     "models": p["models"],
                     "api_base_key": p["api_base_key"],
                     "api_base_default": p["api_base_default"],
+                    "api_base_placeholder": p.get("api_base_placeholder", ""),
                     "api_key_field": p.get("api_key_field"),
                 }
 
@@ -871,7 +952,7 @@ class ConfigHandler:
                 "agent_max_context_tokens": local_config.get("agent_max_context_tokens", 50000),
                 "agent_max_context_turns": local_config.get("agent_max_context_turns", 20),
                 "agent_max_steps": local_config.get("agent_max_steps", 20),
-                "enable_thinking": bool(local_config.get("enable_thinking", True)),
+                "enable_thinking": bool(local_config.get("enable_thinking", False)),
                 "api_bases": api_bases,
                 "api_keys": api_keys_masked,
                 "providers": providers,
@@ -917,6 +998,19 @@ class ConfigHandler:
                 json.dump(file_cfg, f, indent=4, ensure_ascii=False)
 
             logger.info(f"[WebChannel] Config updated: {list(applied.keys())}")
+
+            # Reset Bridge so that bot routing reflects the new config.
+            # Without this, Bridge keeps its cached bot instance (e.g. LinkAIBot)
+            # even after the user switches bot_type / use_linkai / model in UI.
+            bridge_routing_keys = {"bot_type", "use_linkai", "model"}
+            if any(k in applied for k in bridge_routing_keys):
+                try:
+                    from bridge.bridge import Bridge
+                    Bridge().reset_bot()
+                    logger.info("[WebChannel] Bridge bot routing reset due to config change")
+                except Exception as reset_err:
+                    logger.warning(f"[WebChannel] Failed to reset bridge: {reset_err}")
+
             return json.dumps({"status": "success", "applied": applied}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error updating config: {e}")

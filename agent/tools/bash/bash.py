@@ -29,7 +29,7 @@ ENVIRONMENT: All API keys from env_config are auto-injected. Use $VAR_NAME direc
 
 SAFETY:
 - Freely create/modify/delete files within the workspace
-- For destructive and out-of-workspace commands, explain and confirm first"""
+- For destructive commands out of workspace, explain and confirm first"""
 
     params: dict = {
         "type": "object",
@@ -169,10 +169,16 @@ SAFETY:
                 except Exception as retry_err:
                     logger.warning(f"[Bash] Retry failed: {retry_err}")
 
-            # Combine stdout and stderr
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
+            # When command succeeds with stdout, keep output clean (stderr goes to server log only).
+            # When command fails or stdout is empty, include stderr so the agent can diagnose.
+            if result.returncode == 0 and result.stdout.strip():
+                output = result.stdout
+                if result.stderr:
+                    logger.info(f"[Bash] stderr (not forwarded): {result.stderr[:500]}")
+            else:
+                output = result.stdout
+                if result.stderr:
+                    output += "\n" + result.stderr
 
             # Check if we need to save full output to temp file
             temp_file_path = None
