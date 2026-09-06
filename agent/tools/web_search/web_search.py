@@ -8,15 +8,9 @@
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
-<<<<<<< Updated upstream
     canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply]. When
     the caller passes an explicit `provider` it overrides the pick; an
     invalid/unconfigured one silently falls back to the auto order.
-=======
-    canonical order [bocha, zhipu, qianfan, linkai , anysearch]. When the caller passes
-    an explicit `provider` it overrides the pick; an invalid/unconfigured
-    one silently falls back to the auto order.
->>>>>>> Stashed changes
   - strategy 'fixed': use the configured provider; if its credential is
     missing at call time, silently fall back to auto order (no card hint).
 
@@ -270,13 +264,9 @@ class WebSearch(BaseTool):
             if provider == "linkai":
                 return self._search_linkai(query, count, freshness)
             if provider == "anysearch":
-<<<<<<< Updated upstream
-                return self._search_anysearch(query, count)
+                return self._search_anysearch(query, count, freshness, summary)
             if provider == "serply":
                 return self._search_serply(query, count)
-=======
-                return self._search_anysearch(query, count, freshness, summary)
->>>>>>> Stashed changes
             return ToolResult.fail(f"Error: Unknown provider '{provider}'")
         except requests.Timeout:
             return ToolResult.fail(f"Error: Search request timed out after {DEFAULT_TIMEOUT}s")
@@ -582,11 +572,23 @@ class WebSearch(BaseTool):
                 "snippet": it.get("snippet") or (it.get("content") or "")[:200],
             })
         total = (body.get("metadata") or {}).get("total_results", len(results))
-<<<<<<< Updated upstream
-        return ToolResult.success({
-            "query": query, "backend": "anysearch",
-            "total": total, "count": len(results), "results": results,
-        })
+        request_id = resp.headers.get("X-Request-ID") or data.get("request_id")
+        meta = body.get("metadata") or {}
+
+        result = {
+            "query": query,
+            "backend": "anysearch",
+            "total": total,
+            "count": len(results),
+            "results": results,
+        }
+
+        if request_id:
+            result["request_id"] = request_id
+        if meta.get("search_time_ms") is not None:
+            result["search_time_ms"] = meta["search_time_ms"]
+
+        return ToolResult.success(result)
 
     # ------------------------------------------------------------------
     # Serply
@@ -626,22 +628,4 @@ class WebSearch(BaseTool):
             "query": query, "backend": "serply",
             "total": len(results), "count": len(results), "results": results,
         })
-=======
-        request_id = resp.headers.get("X-Request-ID") or data.get("request_id")
-        meta = body.get("metadata") or {}
 
-        result = {
-            "query": query,
-            "backend": "anysearch",
-            "total": total,
-            "count": len(results),
-            "results": results,
-        }
-
-        if request_id:
-            result["request_id"] = request_id
-        if meta.get("search_time_ms") is not None:
-            result["search_time_ms"] = meta["search_time_ms"]
-
-        return ToolResult.success(result)
->>>>>>> Stashed changes
