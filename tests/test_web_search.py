@@ -6,7 +6,7 @@ backends.
 Covers key resolution (config file + environment fallback), the canonical
 provider fallback order, result normalization into the unified output shape,
 the AnySearch-specific count clamp (the shared tool schema allows 1-50 while
-the API accepts 1-20), HTTP and business-level error mapping, and the
+the API accepts 1-10), HTTP and business-level error mapping, and the
 anonymous mode contract (no Authorization header without a key).
 
 No real network is used: ``requests.post`` / ``requests.get`` are stubbed
@@ -20,6 +20,7 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from agent.tools.web_search import WebSearch
 from agent.tools.web_search import web_search as web_search_module
 
 
@@ -108,7 +109,7 @@ class TestAnySearchBackend(unittest.TestCase):
     """Behaviour of WebSearch._search_anysearch with a stubbed HTTP layer."""
 
     def setUp(self):
-        self.tool = web_search_module.WebSearch()
+        self.tool = WebSearch()
 
     def test_search_anysearch_maps_results(self):
         """Results under data.results map to the unified output shape.
@@ -141,7 +142,7 @@ class TestAnySearchBackend(unittest.TestCase):
         self.assertEqual(headers.get("Authorization"), "Bearer test-key-123")
 
     def test_search_anysearch_clamps_count(self):
-        """count is clamped into AnySearch's documented 1-20 range.
+        """count is clamped into AnySearch's documented 1-10 range.
 
         A falsy count falls back to the default of 10, matching the
         `count or 10` idiom used by the zhipu/qianfan backends (execute()
@@ -150,7 +151,7 @@ class TestAnySearchBackend(unittest.TestCase):
         with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
                 patch.object(web_search_module.requests, "post",
                              return_value=_fake_response(200, _anysearch_payload([]))) as mock_post:
-            for count, expected in ((50, 20), (0, 10), (None, 10), (10, 10)):
+            for count, expected in ((50, 10), (0, 10), (None, 10), (10, 10)):
                 with self.subTest(count=count):
                     self.tool._search_anysearch("q", count)
                     self.assertEqual(mock_post.call_args[1]["json"]["max_results"], expected)
@@ -192,6 +193,36 @@ class TestAnySearchBackend(unittest.TestCase):
         self.assertEqual(result.status, "success")
         headers = mock_post.call_args[1]["headers"]
         self.assertNotIn("Authorization", headers)
+
+    def test_search_anysearch_ignores_freshness_with_warning(self):
+        """freshness='oneWeek' logs a warning and is not sent in the payload."""
+        with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
+                patch.object(web_search_module, "logger") as mock_logger, \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, _anysearch_payload([]))) as mock_post:
+            result = self.tool._search_anysearch("q", 10, freshness="oneWeek")
+
+        self.assertEqual(result.status, "success")
+        mock_logger.warning.assert_called_once_with(
+            "[WebSearch] anysearch does not support freshness ('oneWeek'); ignoring"
+        )
+        sent = mock_post.call_args[1]["json"]
+        self.assertNotIn("freshness", sent)
+        self.assertEqual(sent, {"query": "q", "max_results": 10, "format": "json"})
+
+    def test_search_anysearch_ignores_summary_with_warning(self):
+        """summary=True logs a warning; the request payload keeps its plain shape."""
+        with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
+                patch.object(web_search_module, "logger") as mock_logger, \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, _anysearch_payload([]))) as mock_post:
+            result = self.tool._search_anysearch("q", 10, summary=True)
+
+        self.assertEqual(result.status, "success")
+        mock_logger.warning.assert_called_once_with(
+            "[WebSearch] anysearch does not support summary; ignoring"
+        )
+        self.assertNotIn("summary", mock_post.call_args[1]["json"])
 
 
 def _serply_payload(results):

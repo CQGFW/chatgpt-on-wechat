@@ -17,8 +17,12 @@ Search the internet for real-time information, news, research, and more. Support
 | ERNIE | Reuses `qianfan_api_key` | [Qianfan Console](https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy) |
 | Zhipu | Reuses `zhipu_ai_api_key` | [Zhipu Open Platform](https://docs.bigmodel.cn/cn/guide/tools/web-search) |
 | LinkAI | Reuses `linkai_api_key` | [LinkAI Console](https://link-ai.tech/console/interface) |
+<<<<<<< Updated upstream
 | AnySearch | Reuses `anysearch_api_key` | [AnySearch Console](https://anysearch.com/) |
 | Serply | `tools.web_search.serply_api_key` | [Serply](https://serply.io) ([docs](https://serply.io/docs)) |
+=======
+| AnySearch | Optional `tools.web_search.anysearch_api_key`(Anonymous mode is available) | [AnySearch Console](https://anysearch.com/) |
+>>>>>>> Stashed changes
 
 Except for Bocha, AnySearch, and Serply which require dedicated keys (bocha_api_key / anysearch_api_key / serply_api_key), the other three reuse the corresponding model's API key — configuring the model automatically grants search capability.
 
@@ -35,7 +39,11 @@ Except for Bocha, AnySearch, and Serply which require dedicated keys (bocha_api_
 }
 ```
 
+<<<<<<< Updated upstream
 - `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → anysearch → serply`.
+=======
+- `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → anysearch`.
+>>>>>>> Stashed changes
 - `fixed`: always use the provider specified in `provider`; falls back to the auto order if that provider's credentials are missing.
 
 ## Tool Parameters

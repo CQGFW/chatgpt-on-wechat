@@ -8,9 +8,15 @@
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
+<<<<<<< Updated upstream
     canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply]. When
     the caller passes an explicit `provider` it overrides the pick; an
     invalid/unconfigured one silently falls back to the auto order.
+=======
+    canonical order [bocha, zhipu, qianfan, linkai , anysearch]. When the caller passes
+    an explicit `provider` it overrides the pick; an invalid/unconfigured
+    one silently falls back to the auto order.
+>>>>>>> Stashed changes
   - strategy 'fixed': use the configured provider; if its credential is
     missing at call time, silently fall back to auto order (no card hint).
 
@@ -86,10 +92,20 @@ def _get_api_key(provider: str) -> str:
     return ""
 
 
-def configured_providers() -> List[str]:
-    """Return configured providers in canonical order."""
-    return [p for p in PROVIDER_ORDER if _get_api_key(p)]
+def _anysearch_anonymous_enabled() -> bool:
+    """Check if AnySearch anonymous mode is enabled via config."""
+    return bool(_tools_web_search_conf().get("anysearch_anonymous"))
 
+def configured_providers() -> List[str]:
+    """Configured providers in canonical order. anysearch qualifies with a
+    real key OR an explicit anonymous opt-in (still last in fallback order)."""
+    result = []
+    for p in PROVIDER_ORDER:
+        if _get_api_key(p):
+            result.append(p)
+        elif p == "anysearch" and _anysearch_anonymous_enabled():
+            result.append(p)
+    return result
 
 def _configured_strategy() -> str:
     return (_tools_web_search_conf().get("strategy") or "auto").strip().lower()
@@ -121,12 +137,14 @@ class WebSearch(BaseTool):
                 "description": (
                     "Time range filter. Options: "
                     "'noLimit' (default), 'oneDay', 'oneWeek', 'oneMonth', 'oneYear', "
-                    "or date range like '2025-01-01..2025-02-01'"
+                    "or date range like '2025-01-01..2025-02-01'. "
+                    "Honored by bocha/zhipu/qianfan/linkai; ignored by anysearch."
                 )
             },
             "summary": {
                 "type": "boolean",
-                "description": "Whether to include text summary for each result (default: false)"
+                "description": "Whether to include text summary for each result (default: false). "
+                               "Bocha/linkai only; ignored by anysearch."
             }
         },
         "required": ["query"]
@@ -173,6 +191,8 @@ class WebSearch(BaseTool):
         Priority: caller-supplied (if configured) > fixed strategy (if
         configured) > first configured in PROVIDER_ORDER. Silent fallback
         when the desired one has no key.
+
+        For anysearch: considered "available" even without a key (anonymous).
         """
         available = configured_providers()
         if not available:
@@ -191,6 +211,7 @@ class WebSearch(BaseTool):
             if pinned:
                 logger.warning(f"[WebSearch] pinned provider '{pinned}' unavailable, falling back to auto")
 
+        # anysearch 始终在 available 中，所以会作为末位 fallback
         return available[0]
 
     @staticmethod
@@ -220,6 +241,8 @@ class WebSearch(BaseTool):
 
         requested = args.get("provider")
         provider = self._resolve_provider(requested)
+        # This branch is technically unreachable because anysearch is always available
+        # (anonymous tier). It's kept as a defensive guard for future modifications.
         if not provider:
             return ToolResult.fail(
                 "Error: No search provider configured. "
@@ -247,9 +270,13 @@ class WebSearch(BaseTool):
             if provider == "linkai":
                 return self._search_linkai(query, count, freshness)
             if provider == "anysearch":
+<<<<<<< Updated upstream
                 return self._search_anysearch(query, count)
             if provider == "serply":
                 return self._search_serply(query, count)
+=======
+                return self._search_anysearch(query, count, freshness, summary)
+>>>>>>> Stashed changes
             return ToolResult.fail(f"Error: Unknown provider '{provider}'")
         except requests.Timeout:
             return ToolResult.fail(f"Error: Search request timed out after {DEFAULT_TIMEOUT}s")
@@ -504,7 +531,11 @@ class WebSearch(BaseTool):
             "total": 1, "count": 1, "results": [{"content": str(raw)}],
         })
 
-    def _search_anysearch(self, query: str, count: int) -> ToolResult:
+    def _search_anysearch(self, query: str, count: int, freshness: str = "noLimit", summary: bool = False) -> ToolResult:
+        if freshness and freshness != "noLimit":
+            logger.warning(f"[WebSearch] anysearch does not support freshness ({freshness!r}); ignoring")
+        if summary:
+            logger.warning("[WebSearch] anysearch does not support summary; ignoring")
         api_key = _get_api_key("anysearch")
         url = "https://api.anysearch.com/v1/search"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -513,24 +544,30 @@ class WebSearch(BaseTool):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        # AnySearch accepts 1-20 results; the shared tool schema allows 1-50.
-        max_results = max(1, min(int(count or 10), 20))
+        # AnySearch accepts 1-10 results; the shared tool schema allows 1-10.
+        max_results = max(1, min(int(count or 10), 10))
         payload = {"query": query, "max_results": max_results, "format": "json"}
 
-        logger.debug(f"[WebSearch] anysearch: query='{query}', max_results={max_results}")
+        logger.debug(f"[WebSearch] anysearch: query='{query}', max_results={max_results}, has_key={bool(api_key)}")
         resp = requests.post(url, headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
 
         if resp.status_code == 401:
-            return ToolResult.fail("Error: Invalid AnySearch API key.")
+            if api_key:
+                return ToolResult.fail("Error: Invalid AnySearch API key.")
+            return ToolResult.fail(
+                "Error: AnySearch authentication failed. Try configuring an API key at https://anysearch.com")
         if resp.status_code == 402:
-            return ToolResult.fail("Error: AnySearch quota exhausted. Check usage at https://anysearch.com")
+            if api_key:
+                return ToolResult.fail("Error: AnySearch quota exhausted. Check usage at https://anysearch.com")
+            return ToolResult.fail(
+                "Error: AnySearch anonymous quota exhausted. Configure an API key at https://anysearch.com for higher limits.")
         if resp.status_code == 429:
             return ToolResult.fail("Error: AnySearch API rate limit reached.")
         if resp.status_code != 200:
             return ToolResult.fail(f"Error: AnySearch API returned HTTP {resp.status_code}")
 
         data = resp.json()
-        # AnySearch signals success with business code 0 (not 200).
+        # AnySearch signals success with business code 0.
         api_code = data.get("code")
         if api_code not in (0, None):
             msg = data.get("message") or "Unknown error"
@@ -545,6 +582,7 @@ class WebSearch(BaseTool):
                 "snippet": it.get("snippet") or (it.get("content") or "")[:200],
             })
         total = (body.get("metadata") or {}).get("total_results", len(results))
+<<<<<<< Updated upstream
         return ToolResult.success({
             "query": query, "backend": "anysearch",
             "total": total, "count": len(results), "results": results,
@@ -588,3 +626,22 @@ class WebSearch(BaseTool):
             "query": query, "backend": "serply",
             "total": len(results), "count": len(results), "results": results,
         })
+=======
+        request_id = resp.headers.get("X-Request-ID") or data.get("request_id")
+        meta = body.get("metadata") or {}
+
+        result = {
+            "query": query,
+            "backend": "anysearch",
+            "total": total,
+            "count": len(results),
+            "results": results,
+        }
+
+        if request_id:
+            result["request_id"] = request_id
+        if meta.get("search_time_ms") is not None:
+            result["search_time_ms"] = meta["search_time_ms"]
+
+        return ToolResult.success(result)
+>>>>>>> Stashed changes
