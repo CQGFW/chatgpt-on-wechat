@@ -4099,11 +4099,7 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-<<<<<<< Updated upstream
     _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply")
-=======
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch")
->>>>>>> Stashed changes
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
@@ -4164,16 +4160,12 @@ class ModelsHandler:
                 "id": pid,
                 "label": cls._SEARCH_PROVIDER_LABELS.get(pid, pid),
                 "configured": ok,
-<<<<<<< Updated upstream
                 # bocha owns its key under tools.web_search; the other three
                 # piggy-back on a model-vendor credential. Frontend uses
                 # this hint to decide which credential editor to surface.
-                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply"),
-=======
                 # Lets the frontend badge "匿名/anonymous" only in anonymous mode.
                 "anonymous": pid == "anysearch" and ok and not raw_key,
-                "needs_dedicated_key": pid in ("bocha", "anysearch"),
->>>>>>> Stashed changes
+                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply"),
                 "api_key_masked": ConfigHandler._mask_key(raw_key) if raw_key else "",
             })
             if ok:
