@@ -16,6 +16,7 @@ import {
   RadioTower,
   QrCode,
   KeyRound,
+  Pencil,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { t, localizedLabel, getLang } from '../i18n'
@@ -421,6 +422,73 @@ const ModeTab: React.FC<{ icon: LucideIcon; label: string; active: boolean; onCl
   </button>
 )
 
+// Inline rename for a channel instance's friendly name (e.g. "微信2"), mirroring
+// the web console's pencil-edit. Saving only sets a display label; it never
+// touches credentials or the live connection. Enter commits unless an IME
+// composition is active (so typing English via a Chinese IME isn't cut short).
+const InstanceNameEditor: React.FC<{ channel: ChannelInfo; onRenamed: () => void }> = ({
+  channel,
+  onRenamed,
+}) => {
+  const current = channel.instance_name || channel.instance_id || channel.name
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(current)
+  const [saving, setSaving] = useState(false)
+  const composingRef = useRef(false)
+
+  const commit = async () => {
+    const name = value.trim()
+    setEditing(false)
+    if (!name || name === (channel.instance_name || '')) return
+    setSaving(true)
+    try {
+      await apiClient.renameChannelInstance(channel.channel_type || channel.name, channel.instance_id || '', name)
+      onRenamed()
+    } catch (err) {
+      console.error('Failed to rename instance:', err)
+      setValue(current)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-1.5 mt-0.5 group/name">
+        <span className="text-xs text-content-tertiary font-mono truncate">{current}</span>
+        <button
+          onClick={() => {
+            setValue(channel.instance_name || '')
+            setEditing(true)
+          }}
+          className="text-content-tertiary hover:text-content-secondary cursor-pointer opacity-0 group-hover/name:opacity-100 transition-opacity"
+          title={t('channels_rename_instance')}
+        >
+          <Pencil size={11} />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      disabled={saving}
+      onChange={(e) => setValue(e.target.value)}
+      onCompositionStart={() => (composingRef.current = true)}
+      onCompositionEnd={() => (composingRef.current = false)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !composingRef.current) void commit()
+        else if (e.key === 'Escape') setEditing(false)
+      }}
+      placeholder={t('channels_instance_name_placeholder')}
+      className="mt-0.5 w-40 px-2 py-0.5 rounded-btn border border-strong bg-inset text-xs text-content focus:outline-none focus:border-accent"
+    />
+  )
+}
+
 const ChannelCard: React.FC<{
   channel: ChannelInfo
   onChanged: () => void
@@ -570,7 +638,11 @@ const ChannelCard: React.FC<{
               <span className="text-xs text-accent">{t('channels_connected')}</span>
             ) : null}
           </div>
-          <p className="text-xs text-content-tertiary font-mono mt-0.5">{channel.instance_id || channel.name}</p>
+          {multiAgent && channel.instance_id ? (
+            <InstanceNameEditor channel={channel} onRenamed={onChanged} />
+          ) : (
+            <p className="text-xs text-content-tertiary font-mono mt-0.5">{channel.instance_id || channel.name}</p>
+          )}
         </div>
 
         {channel.active ? (

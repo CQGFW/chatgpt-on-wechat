@@ -10,6 +10,10 @@ import type {
   MemoryPage,
   MemoryDoc,
   SchedulerTask,
+  TaskSchedule,
+  TaskAction,
+  SchedulerInstance,
+  TaskRecipient,
   Attachment,
   SessionsPage,
   SessionSettingsState,
@@ -965,6 +969,54 @@ class ApiClient {
     return this.request('/api/scheduler/delete', {
       method: 'POST',
       body: JSON.stringify({ task_id: taskId, agent_id: agentId }),
+    })
+  }
+
+  // Create a cross-channel task for a trusted recipient. The backend derives the
+  // owning Agent from the recipient's channel instance and rejects any receiver
+  // not already in the trusted directory, so the client only names the target.
+  async createTask(payload: {
+    name: string
+    enabled: boolean
+    schedule: TaskSchedule
+    action: TaskAction
+  }): Promise<{ status: string; task?: SchedulerTask; message?: string }> {
+    return this.request('/api/scheduler/create', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  // Step 1 of the create/edit picker: channel instances a task can deliver
+  // through (web/unknown excluded). Each carries a friendly name, its bound
+  // Agent, and how many trusted recipients it has.
+  async getSchedulerInstances(): Promise<SchedulerInstance[]> {
+    const data = await this.request<{ status: string; instances: SchedulerInstance[] }>(
+      '/api/scheduler/instances'
+    )
+    return data.instances || []
+  }
+
+  // Step 2 of the picker: every trusted recipient learned from inbound messages,
+  // shared across Agents. The UI scopes them to the chosen instance client-side.
+  async getSchedulerRecipients(): Promise<TaskRecipient[]> {
+    const data = await this.request<{ status: string; recipients: TaskRecipient[] }>(
+      '/api/scheduler/recipients'
+    )
+    return data.recipients || []
+  }
+
+  // Set a channel instance's friendly display name. Goes through the shared
+  // /api/channels endpoint with the 'rename' action; does not touch credentials
+  // or the live connection, so renaming never interrupts a running channel.
+  async renameChannelInstance(
+    channel: string,
+    instanceId: string,
+    name: string
+  ): Promise<{ status: string; instance_id?: string; name?: string; message?: string }> {
+    return this.request('/api/channels', {
+      method: 'POST',
+      body: JSON.stringify({ action: 'rename', channel, instance_id: instanceId, name }),
     })
   }
 

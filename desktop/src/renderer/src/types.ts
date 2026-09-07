@@ -711,6 +711,9 @@ export interface ChannelInfo {
   channel_type?: string
   agent_id?: string
   members?: string[]
+  // User-editable display name for this instance (e.g. "微信2"); empty falls back
+  // to the instance id. Present only on per-instance cards (multi-Agent mode).
+  instance_name?: string
 }
 
 // The full /api/channels response. Legacy single-Agent installs only populate
@@ -723,7 +726,7 @@ export interface ChannelsResponse {
   instances?: ChannelInfo[]
 }
 
-export type ChannelAction = 'save' | 'connect' | 'disconnect'
+export type ChannelAction = 'save' | 'connect' | 'disconnect' | 'rename'
 
 // ============================================================
 // Agents / team roster (multi-Agent mode)
@@ -739,6 +742,9 @@ export interface AgentProfile {
   model?: string
   bot_type?: string
   avatar?: string
+  // Cache-busting token from the avatar file's mtime; changes on every upload
+  // so the <img> refetches even when the roster revision hasn't moved.
+  avatar_rev?: string
   skills?: string[]
   knowledge?: string[]
   // "shared" (reads the default Agent's knowledge base) or "own" (private dir).
@@ -910,6 +916,15 @@ export interface TaskAction {
   receiver_name?: string
   is_group?: boolean
   channel_type?: string
+  // The exact channel login this task delivers through. For a legacy
+  // single-instance channel it equals channel_type. Ownership derives from this.
+  instance_id?: string
+  // Session the push/notification is threaded into; preserved across edits.
+  notify_session_id?: string
+  // Channel-specific delivery hints preserved across edits when the target is
+  // unchanged (e.g. DingTalk needs the sender staff id to reply).
+  dingtalk_sender_staff_id?: string
+  silent?: boolean
 }
 
 export interface SchedulerTask {
@@ -923,7 +938,38 @@ export interface SchedulerTask {
   next_run_at?: string
   // The Agent that owns this task. Present only in multi-Agent installs; used to
   // route mutations to the right store and to show the owner badge on the card.
+  // For an IM task this is the *effective* owner the backend derives from the
+  // delivery instance's current binding, so it stays honest after a re-bind.
   agent_id?: string
+}
+
+// A channel instance the console can deliver a scheduled task through. The
+// task-create flow picks one of these first, then a recipient within it.
+// Mirrors GET /api/scheduler/instances.
+export interface SchedulerInstance {
+  instance_id: string
+  channel_type: string
+  // User-friendly instance name (falls back to a bot name / type label / id).
+  name: string
+  // Friendly channel-type label (e.g. "微信"), shown on the right of the picker.
+  channel_label: string
+  // The Agent this instance is bound to (""/absent -> default Agent).
+  agent_id?: string
+  recipient_count: number
+}
+
+// A trusted recipient learned from an inbound message on some instance. Mirrors
+// GET /api/scheduler/recipients.
+export interface TaskRecipient {
+  channel_type: string
+  instance_id: string
+  receiver: string
+  name: string
+  is_group: boolean
+  session_id: string
+  // Friendly name of the instance that saw this recipient.
+  instance_name?: string
+  last_seen_at?: string
 }
 
 // ============================================================
