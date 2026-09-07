@@ -4509,13 +4509,33 @@ function resetComposerHeight() {
 })();
 
 
-// Smart auto-scroll: pause when user scrolls up, resume when near bottom
+// Smart auto-scroll: pause as soon as the user scrolls up, resume only when
+// they return near the bottom. We must distinguish a real user gesture from
+// the programmatic scroll that scrollChatToBottom() performs on every stream
+// tick — otherwise a tiny upward scroll (still within the bottom threshold)
+// leaves auto-scroll on and the next tick yanks the view back down, which
+// feels like the list "fighting" the user and snapping to the bottom.
 let _autoScrollEnabled = true;
 const _SCROLL_THRESHOLD = 80; // px from bottom to re-enable auto-scroll
+let _programmaticScroll = false; // set while scrollChatToBottom() adjusts scrollTop
+let _lastScrollTop = 0;
 
 messagesDiv.addEventListener('scroll', () => {
-    const distFromBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight;
-    _autoScrollEnabled = distFromBottom <= _SCROLL_THRESHOLD;
+    const scrollTop = messagesDiv.scrollTop;
+    const distFromBottom = messagesDiv.scrollHeight - scrollTop - messagesDiv.clientHeight;
+
+    if (_programmaticScroll) {
+        // Our own scroll-to-bottom; don't reinterpret it as user intent.
+        _programmaticScroll = false;
+    } else if (scrollTop < _lastScrollTop - 1) {
+        // User scrolled up (any amount) -> stop following the stream.
+        _autoScrollEnabled = false;
+    } else if (distFromBottom <= _SCROLL_THRESHOLD) {
+        // User is back near the bottom -> resume auto-scroll.
+        _autoScrollEnabled = true;
+    }
+
+    _lastScrollTop = scrollTop;
     _updateScrollToBottomBtn();
 });
 
@@ -8897,7 +8917,16 @@ function updateSubstepCount(toolEl, count) {
 
 function scrollChatToBottom(force) {
     if (force || _autoScrollEnabled) {
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        if (force) _autoScrollEnabled = true;
+        const target = messagesDiv.scrollHeight;
+        // Only flag a programmatic scroll when scrollTop will actually change
+        // (i.e. a scroll event will fire). Otherwise the flag would go stale
+        // and swallow the user's next real scroll-up gesture.
+        if (Math.abs(messagesDiv.scrollTop - target) > 1) {
+            _programmaticScroll = true;
+        }
+        messagesDiv.scrollTop = target;
+        _lastScrollTop = messagesDiv.scrollTop;
     }
 }
 
