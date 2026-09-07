@@ -1,13 +1,15 @@
 # encoding:utf-8
 """
-Unit tests for the web_search tool, focused on the AnySearch and Serply
-backends.
+Unit tests for the web_search tool, focused on the AnySearch, Serply and
+Keenable backends.
 
 Covers key resolution (config file + environment fallback), the canonical
 provider fallback order, result normalization into the unified output shape,
 the AnySearch-specific count clamp (the shared tool schema allows 1-50 while
 the API accepts 1-10), HTTP and business-level error mapping, and the
-anonymous mode contract (no Authorization header without a key).
+anonymous mode contract (no Authorization header without a key), and the
+keyless contract of Keenable (always configured; public endpoint plus the
+``X-Keenable-Title`` header without a key, ``X-API-Key`` with one).
 
 No real network is used: ``requests.post`` / ``requests.get`` are stubbed
 throughout.
@@ -78,13 +80,15 @@ class TestAnySearchKeyResolution(unittest.TestCase):
 
 class TestProviderOrder(unittest.TestCase):
     """New providers are appended after the four originals, leaving existing
-    routing untouched: anysearch first, then serply."""
+    routing untouched: anysearch, then serply, then keenable (keyless, so it
+    must come after every provider the user may have paid for)."""
 
     def test_provider_order_appends_new_providers_last(self):
         self.assertEqual(
             web_search_module.PROVIDER_ORDER,
-            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply"),
+            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "keenable"),
         )
+        self.assertEqual(web_search_module.KEYLESS_PROVIDERS, ("keenable",))
 
     def test_web_console_provider_list_stays_in_sync(self):
         """The web console keeps its own copy of the provider order plus the
@@ -103,6 +107,55 @@ class TestProviderOrder(unittest.TestCase):
             self.assertEqual(ModelsHandler._search_provider_key("serply", {}), "env-key")
         with patch.dict(os.environ, {"SERPLY_API_KEY": ""}):
             self.assertEqual(ModelsHandler._search_provider_key("serply", {}), "")
+
+        self.assertEqual(ModelsHandler._KEYLESS_SEARCH_PROVIDERS, web_search_module.KEYLESS_PROVIDERS)
+        cfg = {"tools": {"web_search": {"keenable_api_key": "console-key"}}}
+        self.assertEqual(ModelsHandler._search_provider_key("keenable", cfg), "console-key")
+        with patch.dict(os.environ, {"KEENABLE_API_KEY": "env-key"}):
+            self.assertEqual(ModelsHandler._search_provider_key("keenable", {}), "env-key")
+
+    def test_web_console_marks_keyless_provider_configured(self):
+        """With no credential anywhere the Search panel still shows keenable
+        as configured (and as the active backend), so the console agrees
+        with the tool about what a fresh install can do."""
+        from channel.web.web_channel import ModelsHandler
+
+        env = {k: "" for k in _ALL_SEARCH_ENV}
+        with patch.dict(os.environ, env):
+            cap = ModelsHandler._search_capability({})
+        by_id = {p["id"]: p for p in cap["providers"]}
+        self.assertTrue(by_id["keenable"]["configured"])
+        self.assertTrue(by_id["keenable"]["needs_dedicated_key"])
+        self.assertEqual(by_id["keenable"]["api_key_masked"], "")
+        self.assertFalse(by_id["serply"]["configured"])
+        self.assertEqual(cap["current_provider"], "keenable")
+
+
+_ALL_SEARCH_ENV = (
+    "BOCHA_API_KEY", "ZHIPUAI_API_KEY", "QIANFAN_API_KEY", "LINKAI_API_KEY",
+    "ANYSEARCH_API_KEY", "SERPLY_API_KEY", "KEENABLE_API_KEY",
+)
+
+
+class TestKeylessAvailability(unittest.TestCase):
+    """Keenable needs no key, so the tool is registered on a fresh install and
+    keenable is what a keyless install resolves to. A configured provider
+    still wins because keenable sits last in PROVIDER_ORDER."""
+
+    def test_no_keys_still_configures_keenable(self):
+        with patch.object(web_search_module, "conf", lambda: {}), \
+                patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            self.assertEqual(web_search_module.configured_providers(), ["keenable"])
+            self.assertTrue(web_search_module.WebSearch.is_available())
+            self.assertEqual(web_search_module.WebSearch()._resolve_provider(None), "keenable")
+
+    def test_keyed_provider_wins_over_keenable(self):
+        cfg = {"tools": {"web_search": {"serply_api_key": "k"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg), \
+                patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            self.assertEqual(web_search_module.configured_providers(), ["serply", "keenable"])
+            self.assertEqual(web_search_module.WebSearch()._resolve_provider(None), "serply")
+            self.assertEqual(web_search_module.WebSearch()._resolve_provider("keenable"), "keenable")
 
 
 class TestAnySearchBackend(unittest.TestCase):
@@ -316,6 +369,148 @@ class TestSerplyBackend(unittest.TestCase):
                     result = self.tool._search_serply("q", 10)
                 self.assertEqual(result.status, "error")
                 self.assertIn(fragment, result.result)
+
+
+def _keenable_payload(results):
+    """Build a Keenable /v1/search response body in the documented shape."""
+    return {"query": "q", "results": results}
+
+
+class TestKeenableKeyResolution(unittest.TestCase):
+    """The keenable key lives under tools.web_search, falling back to env."""
+
+    def setUp(self):
+        self._prev_env = os.environ.get("KEENABLE_API_KEY")
+        os.environ.pop("KEENABLE_API_KEY", None)
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("KEENABLE_API_KEY", None)
+        else:
+            os.environ["KEENABLE_API_KEY"] = self._prev_env
+
+    def test_keenable_key_from_tools_config(self):
+        """tools.web_search.keenable_api_key is resolved, and wins over env."""
+        cfg = {"tools": {"web_search": {"keenable_api_key": "test-key-123"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg):
+            self.assertEqual(web_search_module._get_api_key("keenable"), "test-key-123")
+            with patch.dict(os.environ, {"KEENABLE_API_KEY": "env-key-456"}):
+                self.assertEqual(web_search_module._get_api_key("keenable"), "test-key-123")
+
+    def test_keenable_key_env_fallback(self):
+        """Without a config value, KEENABLE_API_KEY is used; both empty -> ''."""
+        with patch.object(web_search_module, "conf", lambda: {}):
+            with patch.dict(os.environ, {"KEENABLE_API_KEY": "env-key-456"}):
+                self.assertEqual(web_search_module._get_api_key("keenable"), "env-key-456")
+            self.assertEqual(web_search_module._get_api_key("keenable"), "")
+
+
+class TestKeenableBackend(unittest.TestCase):
+    """Behaviour of WebSearch._search_keenable with a stubbed HTTP layer."""
+
+    def setUp(self):
+        self.tool = web_search_module.WebSearch()
+
+    def test_search_keenable_keyless_uses_public_endpoint(self):
+        """Without a key the public endpoint is called with the app title
+        header and no X-API-Key; `snippet` maps to snippet, falling back to
+        `description`, and `published_at` to datePublished."""
+        payload = _keenable_payload([
+            {"title": "T1", "url": "https://a.example/1", "snippet": "s1", "description": "",
+             "published_at": "2026-08-07T09:56:16Z"},
+            {"title": "T2", "url": "https://a.example/2", "snippet": "", "description": "d2"},
+        ])
+        with patch.object(web_search_module, "_get_api_key", return_value=""), \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, payload)) as mock_post:
+            result = self.tool._search_keenable("cowagent", 10, "noLimit", False)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.result["backend"], "keenable")
+        self.assertEqual(result.result["total"], 2)
+        self.assertEqual(result.result["count"], 2)
+        first, second = result.result["results"]
+        self.assertEqual(first, {"title": "T1", "url": "https://a.example/1", "snippet": "s1",
+                                 "datePublished": "2026-08-07T09:56:16Z"})
+        self.assertEqual(second["snippet"], "d2")
+        self.assertEqual(second["datePublished"], "")
+
+        self.assertEqual(mock_post.call_args[0][0], "https://api.keenable.ai/v1/search/public")
+        headers = mock_post.call_args[1]["headers"]
+        self.assertEqual(headers.get("X-Keenable-Title"), "cowagent")
+        self.assertNotIn("X-API-Key", headers)
+        body = mock_post.call_args[1]["json"]
+        self.assertEqual(body["query"], "cowagent")
+        self.assertEqual(body["max_results"], 10)
+        self.assertEqual(body["snippet_max_length"], 300)
+        self.assertNotIn("published_after", body)
+
+    def test_search_keenable_keyed_uses_authenticated_endpoint(self):
+        """With a key the authenticated endpoint is called with X-API-Key; the
+        app title header is still sent. summary=True asks for longer snippets."""
+        with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, _keenable_payload([]))) as mock_post:
+            result = self.tool._search_keenable("q", 10, "noLimit", True)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(mock_post.call_args[0][0], "https://api.keenable.ai/v1/search")
+        headers = mock_post.call_args[1]["headers"]
+        self.assertEqual(headers.get("X-API-Key"), "test-key-123")
+        self.assertEqual(headers.get("X-Keenable-Title"), "cowagent")
+        self.assertEqual(mock_post.call_args[1]["json"]["snippet_max_length"], 1000)
+
+    def test_search_keenable_clamps_count(self):
+        """count is clamped into 1-50 and sent as max_results; a falsy count
+        falls back to the default of 10."""
+        with patch.object(web_search_module, "_get_api_key", return_value=""), \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, _keenable_payload([]))) as mock_post:
+            for count, expected in ((50, 50), (99, 50), (0, 10), (None, 10), (10, 10)):
+                with self.subTest(count=count):
+                    self.tool._search_keenable("q", count, "noLimit", False)
+                    self.assertEqual(mock_post.call_args[1]["json"]["max_results"], expected)
+
+    def test_search_keenable_freshness_filter(self):
+        """Named tokens become published_after; a date range becomes
+        published_after + published_before; anything else sends no filter."""
+        build = web_search_module.WebSearch._keenable_build_freshness_filter
+        self.assertEqual(build("noLimit"), {})
+        self.assertEqual(build(""), {})
+        self.assertEqual(build("someday"), {})
+        self.assertEqual(
+            build("2025-01-01..2025-02-01"),
+            {"published_after": "2025-01-01", "published_before": "2025-02-01"},
+        )
+        week = build("oneWeek")
+        self.assertEqual(list(week), ["published_after"])
+        from datetime import datetime, timedelta
+        self.assertEqual(week["published_after"], (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d"))
+
+    def test_search_keenable_error_status_mapping(self):
+        """401/429 map to specific messages; other statuses are generic. A
+        keyless 429 points at the optional key, a keyed one does not."""
+        cases = {
+            401: "Invalid Keenable API key",
+            429: "rate limit reached",
+            500: "HTTP 500",
+        }
+        for status_code, fragment in cases.items():
+            with self.subTest(status_code=status_code):
+                with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
+                        patch.object(web_search_module.requests, "post",
+                                     return_value=_fake_response(status_code)):
+                    result = self.tool._search_keenable("q", 10, "noLimit", False)
+                self.assertEqual(result.status, "error")
+                self.assertIn(fragment, result.result)
+                self.assertNotIn("KEENABLE_API_KEY", result.result)
+
+        with patch.object(web_search_module, "_get_api_key", return_value=""), \
+                patch.object(web_search_module.requests, "post", return_value=_fake_response(429)):
+            result = self.tool._search_keenable("q", 10, "noLimit", False)
+        self.assertEqual(result.status, "error")
+        self.assertIn("rate limit reached", result.result)
+        self.assertIn("KEENABLE_API_KEY", result.result)
 
 
 if __name__ == "__main__":

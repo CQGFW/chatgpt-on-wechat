@@ -4228,7 +4228,11 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply")
+    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "keenable")
+
+    # Providers that work without a key (mirrors KEYLESS_PROVIDERS in the
+    # tool module). They show as configured even with no credential.
+    _KEYLESS_SEARCH_PROVIDERS = ("keenable",)
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
@@ -4237,6 +4241,7 @@ class ModelsHandler:
         "linkai":  {"zh": "LinkAI", "en": "LinkAI"},
         "anysearch": {"zh": "AnySearch", "en": "AnySearch"},
         "serply":  {"zh": "Serply", "en": "Serply"},
+        "keenable": {"zh": "Keenable", "en": "Keenable"},
     }
 
     @classmethod
@@ -4262,6 +4267,11 @@ class ModelsHandler:
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
             return (block.get("serply_api_key") if isinstance(block, dict) else "") or os.environ.get(
                 "SERPLY_API_KEY", "")
+        if provider == "keenable":
+            tools_cfg = local_config.get("tools") or {}
+            block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
+            return (block.get("keenable_api_key") if isinstance(block, dict) else "") or os.environ.get(
+                "KEENABLE_API_KEY", "")
         return ""
 
     @classmethod
@@ -4284,7 +4294,7 @@ class ModelsHandler:
                 # AnySearch: real key, or an explicit anonymous opt-in.
                 ok = cls._is_real_key(raw_key) or anonymous_on
             else:
-                ok = cls._is_real_key(raw_key)
+                ok = cls._is_real_key(raw_key) or pid in cls._KEYLESS_SEARCH_PROVIDERS
             providers.append({
                 "id": pid,
                 "label": cls._SEARCH_PROVIDER_LABELS.get(pid, pid),
@@ -4294,7 +4304,7 @@ class ModelsHandler:
                 # this hint to decide which credential editor to surface.
                 # Lets the frontend badge "匿名/anonymous" only in anonymous mode.
                 "anonymous": pid == "anysearch" and ok and not raw_key,
-                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply"),
+                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply", "keenable"),
                 "api_key_masked": ConfigHandler._mask_key(raw_key) if raw_key else "",
             })
             if ok:
@@ -5237,11 +5247,12 @@ class ModelsHandler:
     def _handle_set_search_credential(self, data: dict) -> str:
         """Persist a dedicated search-provider key under tools.web_search.
 
-        bocha, anysearch and serply own their keys here; zhipu/qianfan/linkai
-        reuse model-vendor credentials and go through set_provider instead.
+        bocha, anysearch, serply and keenable own their keys here (keenable's
+        is optional); zhipu/qianfan/linkai reuse model-vendor credentials and
+        go through set_provider instead.
         """
         provider = (data.get("provider") or "bocha").strip().lower()
-        if provider not in ("bocha", "anysearch", "serply"):
+        if provider not in ("bocha", "anysearch", "serply", "keenable"):
             return json.dumps({"status": "error", "message": f"unsupported search provider: {provider!r}"})
 
         if provider == "anysearch":

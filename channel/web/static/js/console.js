@@ -160,6 +160,8 @@ const I18N = {
         models_search_anysearch_anon_hint: '留空可启用匿名模式（无需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
+        models_search_keenable_title: '配置 Keenable API Key（可选）',
+        models_search_keenable_desc: 'Keenable 无需密钥即可使用；配置密钥仅用于提升频率上限，前往 keenable.ai 获取。',
         models_search_edit_hint: '点击修改配置',
         models_unavailable: '不可用',
         models_set_via_env: '通过环境变量启用',
@@ -648,6 +650,8 @@ const I18N = {
         models_search_anysearch_anon_hint: '留空可啟用匿名模式（無需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
+        models_search_keenable_title: '設定 Keenable API Key（選填）',
+        models_search_keenable_desc: 'Keenable 無需金鑰即可使用；設定金鑰僅用於提高呼叫頻率上限，前往 keenable.ai 取得。',
         models_search_edit_hint: '點選修改設定',
         models_unavailable: '不可用',
         models_set_via_env: '透過環境變數啟用',
@@ -1131,6 +1135,8 @@ const I18N = {
         models_search_anysearch_anon_hint: 'Leave empty to enable anonymous mode (no API key required)',
         models_search_anonymous_badge: 'anonymous',
         models_search_anonymous_disable: 'Disable anonymous',
+        models_search_keenable_title: 'Configure Keenable API Key (optional)',
+        models_search_keenable_desc: 'Keenable works without a key; a key only lifts the rate limits. Get one at keenable.ai.',
         models_search_edit_hint: 'Click to edit',
         models_unavailable: 'unavailable',
         models_set_via_env: 'enable via environment variable',
@@ -10959,7 +10965,7 @@ function openSearchAddProviderPicker(missingProviders) {
 }
 
 function _launchSearchProviderConfig(providerId, providerMeta) {
-    if (providerId === 'bocha' || providerId === 'anysearch' || providerId === 'serply') {
+    if (providerId === 'bocha' || providerId === 'anysearch' || providerId === 'serply' || providerId === 'keenable') {
         openSearchKeyModal(providerId, providerMeta);
     } else {
         openVendorModal(providerId, () => loadModelsView({ preserveScroll: true }));
