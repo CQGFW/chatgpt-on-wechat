@@ -29,10 +29,19 @@ import type {
   ChannelsResponse,
   RosterSnapshot,
 } from '../types'
-import { getLang } from '../i18n'
+import { getLang, t } from '../i18n'
 
 export interface ApiResult {
   status: string
+  message?: string
+}
+
+export interface UploadResult {
+  status: string
+  file_path: string
+  file_name: string
+  file_type: string
+  preview_url: string
   message?: string
 }
 
@@ -160,15 +169,20 @@ class ApiClient {
     // query only, and only when the form doesn't already name an Agent.
     const scopedPath = formData.has('agent_id') ? path : this.carryAgent(path).path
     const url = `${this.baseUrl}${scopedPath}`
-    // A plain `fetch` that never reaches the backend throws a bare
-    // `TypeError: Failed to fetch`, which is useless in a bug report. The most
-    // common cause here is a transient connection refusal (the local backend
-    // still booting, or briefly restarting), so retry once after a short delay
-    // and, on a persistent network failure, raise an actionable message that
-    // names the target URL instead of the opaque browser error.
+    // A plain `fetch` throws a bare `TypeError: Failed to fetch` for any
+    // network-level failure. In Electron this is almost never "the backend is
+    // down" — the backend is a local child process that either answers with a
+    // JSON error or a real HTTP status. It's a transient connection reset:
+    // the WSGI thread pool is momentarily busy (an SSE stream holding threads,
+    // a concurrent request), or the socket got dropped mid-body. It's
+    // intermittent and unrelated to the file's type, which is why some uploads
+    // go through and others don't. So retry a few times with backoff before
+    // giving up, and never surface the internal "local service / backend"
+    // wording to the user — just tell them the upload was interrupted.
+    const maxAttempts = 4
     let lastErr: unknown
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (attempt > 0) await new Promise((r) => setTimeout(r, 600))
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 400 * attempt))
       try {
         const res = await fetch(url, {
           method: 'POST',
@@ -196,10 +210,10 @@ class ApiClient {
         if (!isNetwork) throw e
       }
     }
+    // Keep the technical detail (the target URL and raw error) in the console
+    // for bug reports, but hand the user a plain, non-alarming message.
     console.error(`[api] upload network failure to ${url}:`, lastErr)
-    throw new Error(
-      `无法连接到本地服务 (${url})，请确认客户端后台正在运行后重试`,
-    )
+    throw new Error(t('upload_network_error'))
   }
 
   // ---------------------------------------------------------
@@ -297,14 +311,70 @@ class ApiClient {
   // Upload / files
   // ---------------------------------------------------------
 
-  async uploadFile(file: File, sessionId?: string): Promise<{
-    status: string
-    file_path: string
-    file_name: string
-    file_type: string
-    preview_url: string
-    message?: string
-  }> {
+  // Whether the backend runs on this machine. Only then does a local file path
+  // mean anything to it; a remote backend must receive the bytes.
+  private isLoopbackBackend(): boolean {
+    try {
+      const host = new URL(this.baseUrl).hostname
+      return host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1'
+    } catch {
+      return false
+    }
+  }
+
+  private desktopTokenPromise: Promise<string> | null = null
+
+  private getDesktopToken(): Promise<string> {
+    if (!this.desktopTokenPromise) {
+      const api = typeof window !== 'undefined' ? window.electronAPI : undefined
+      this.desktopTokenPromise = api?.getDesktopToken
+        ? api.getDesktopToken().catch(() => '')
+        : Promise.resolve('')
+    }
+    return this.desktopTokenPromise
+  }
+
+  /**
+   * Hand the local backend the file's path and let it copy the file itself.
+   *
+   * Resolves to null when this route doesn't apply (no path, remote backend,
+   * not running under the desktop shell) or the backend declines, so the
+   * caller falls back to a regular multipart upload. Never throws.
+   */
+  private async importLocalFile(
+    file: File,
+    sessionId?: string
+  ): Promise<UploadResult | null> {
+    const api = typeof window !== 'undefined' ? window.electronAPI : undefined
+    if (!api?.getPathForFile || !this.isLoopbackBackend()) return null
+    const localPath = api.getPathForFile(file)
+    if (!localPath) return null
+    const token = await this.getDesktopToken()
+    if (!token) return null
+    try {
+      const body: Record<string, unknown> = { local_path: localPath }
+      if (sessionId) body.session_id = sessionId
+      const res = await this.request<UploadResult>('/upload', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'X-Cow-Desktop-Token': token },
+      })
+      if (res?.status === 'success') return res
+      console.warn('[api] import by path declined, falling back to upload:', res?.message)
+      return null
+    } catch (e) {
+      console.warn('[api] import by path failed, falling back to upload:', e)
+      return null
+    }
+  }
+
+  async uploadFile(file: File, sessionId?: string): Promise<UploadResult> {
+    // Same machine, same disk: skip the HTTP body entirely when we can. The
+    // multipart route below stays as the fallback for pasted images (no path),
+    // remote backends and plain browsers.
+    const imported = await this.importLocalFile(file, sessionId)
+    if (imported) return imported
+
     const formData = new FormData()
     // Read the file into memory (a Blob) instead of appending the File directly.
     // In Electron, `fetch` streaming a File straight from disk intermittently

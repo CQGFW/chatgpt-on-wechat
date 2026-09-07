@@ -9,6 +9,10 @@ export interface ElectronAPI {
   getBackendError: () => Promise<BackendFailure | null>
   /** Data dir holding config.json and run.log (~/.cow in packaged builds). */
   getDataDir: () => Promise<string>
+  /** Per-launch secret shared with the spawned backend (desktop-only requests). */
+  getDesktopToken?: () => Promise<string>
+  /** On-disk path of a picked/dropped File; '' when it has none (pasted image). */
+  getPathForFile?: (file: File) => string
   restartBackend: () => Promise<boolean>
   selectDirectory: () => Promise<string | null>
   selectFile: (filters?: { name: string; extensions: string[] }[]) => Promise<string | null>

@@ -48,6 +48,40 @@ from channel.web.openai_api import OpenAIChatCompletionsHandler
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".avi", ".mov", ".mkv"}
 
+# Cap for a file the desktop client asks us to import by path. Matches the
+# multipart body cap on the HTTP server so both upload routes agree.
+MAX_LOCAL_IMPORT_BYTES = 512 * 1024 * 1024
+
+
+def _is_loopback_request() -> bool:
+    """True when the current request came straight from this machine.
+
+    A request that went through a reverse proxy carries forwarding headers even
+    if the proxy itself sits on localhost, so those disqualify it.
+    """
+    env = getattr(web.ctx, "env", {}) or {}
+    if env.get("HTTP_X_FORWARDED_FOR") or env.get("HTTP_X_REAL_IP"):
+        return False
+    addr = (env.get("REMOTE_ADDR") or "").strip()
+    return addr in ("::1", "::ffff:127.0.0.1") or addr.startswith("127.")
+
+
+def _desktop_token_matches() -> bool:
+    """Whether the request carries the secret the desktop shell handed us.
+
+    The shell generates a random token per launch and passes it in via
+    COW_DESKTOP_TOKEN when it spawns the backend, then sends it back on its own
+    requests. A browser tab talking to the same port never sees the env of the
+    process, so it can't forge this; a source run without the shell has no
+    token, and the check simply fails closed.
+    """
+    expected = os.environ.get("COW_DESKTOP_TOKEN", "")
+    if not expected:
+        return False
+    env = getattr(web.ctx, "env", {}) or {}
+    provided = env.get("HTTP_X_COW_DESKTOP_TOKEN", "")
+    return bool(provided) and hmac.compare_digest(provided, expected)
+
 
 @dataclass
 class SSEStreamState:
@@ -1326,11 +1360,19 @@ class WebChannel(ChatChannel):
             logger.warning(f"[WebChannel] voice cleanup failed: {e}")
 
     def upload_file(self):
-        """Handle file or directory upload via multipart/form-data."""
+        """Handle file or directory upload via multipart/form-data.
+
+        A JSON body ({"local_path": ...}) instead selects the desktop-only
+        import-by-path route, see `_import_local_file`.
+        """
 
         def _reject(message):
             logger.warning("[WebChannel] Upload rejected: %s", message)
             return json.dumps({"status": "error", "message": message})
+
+        content_type = (web.ctx.env.get("CONTENT_TYPE") or "").lower()
+        if content_type.startswith("application/json"):
+            return self._import_local_file(_reject)
 
         try:
             # Trace the request on arrival: it is the only way to tell a client
@@ -1448,6 +1490,78 @@ class WebChannel(ChatChannel):
 
         except Exception as e:
             logger.error(f"[WebChannel] File upload error: {e}", exc_info=True)
+            return json.dumps({"status": "error", "message": str(e)})
+
+    def _import_local_file(self, _reject):
+        """Attach a file that already sits on this machine, by path.
+
+        The desktop client and its backend share a filesystem, so pushing the
+        bytes through an HTTP multipart body only adds a place to fail: the
+        renderer's network stack, keep-alive sockets shared with SSE streams,
+        and on Windows security software proxying localhost traffic all produced
+        intermittent "Failed to fetch" errors that looked like a dead backend.
+        Copying the file directly has none of those moving parts.
+
+        Only the desktop shell may use this: the request must originate on the
+        loopback interface and carry the per-launch token the shell passed to
+        this process. Anyone else (including a browser on the same machine)
+        gets a plain error and falls back to the multipart route.
+        """
+        try:
+            payload = json.loads(web.data() or b"{}")
+        except (ValueError, TypeError):
+            return _reject("Invalid JSON body")
+        if not isinstance(payload, dict):
+            return _reject("Invalid JSON body")
+
+        local_path = str(payload.get("local_path") or "").strip()
+        if not local_path:
+            return _reject("local_path is required")
+
+        if not (_is_loopback_request() and _desktop_token_matches()):
+            return _reject("Import by path is only available to the desktop client")
+
+        if not os.path.isabs(local_path):
+            return _reject("local_path must be absolute")
+        real_path = os.path.realpath(local_path)
+        if not os.path.isfile(real_path):
+            return _reject("File not found")
+        size = os.path.getsize(real_path)
+        if size > MAX_LOCAL_IMPORT_BYTES:
+            return _reject("File too large")
+
+        agent_id = _request_agent_id(payload)
+        if not agent_id:
+            from urllib.parse import parse_qs
+            agent_id = _request_agent_id(parse_qs(web.ctx.env.get("QUERY_STRING") or ""))
+
+        try:
+            upload_dir = _get_upload_dir(agent_id)
+            original_name = os.path.basename(local_path)
+            ext = os.path.splitext(original_name)[1].lower()
+            safe_name = f"web_{uuid.uuid4().hex[:8]}{ext}"
+            save_path = os.path.join(upload_dir, safe_name)
+            shutil.copyfile(real_path, save_path)
+
+            if ext in IMAGE_EXTENSIONS:
+                file_type = "image"
+            elif ext in VIDEO_EXTENSIONS:
+                file_type = "video"
+            else:
+                file_type = "file"
+
+            logger.info(
+                f"[WebChannel] File imported by path: {original_name} -> {save_path} ({file_type}, {size} bytes)"
+            )
+            return json.dumps({
+                "status": "success",
+                "file_path": save_path,
+                "file_name": original_name,
+                "file_type": file_type,
+                "preview_url": f"/uploads/{quote(safe_name, safe='/')}",
+            }, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Local file import error: {e}", exc_info=True)
             return json.dumps({"status": "error", "message": str(e)})
 
     def post_message(self):

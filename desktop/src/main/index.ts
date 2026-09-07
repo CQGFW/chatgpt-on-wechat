@@ -428,6 +428,12 @@ function setupIPC() {
     return pythonBackend?.getDataDir() ?? ''
   })
 
+  // Secret shared with the spawned backend; lets the renderer prove a request
+  // comes from this desktop shell (see COW_DESKTOP_TOKEN in python-manager).
+  ipcMain.handle('get-desktop-token', () => {
+    return pythonBackend?.getDesktopToken() ?? ''
+  })
+
   ipcMain.handle('restart-backend', async () => {
     await pythonBackend?.restart()
     return true

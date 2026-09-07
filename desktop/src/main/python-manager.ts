@@ -6,6 +6,7 @@ import os from 'os'
 import fs from 'fs'
 import http from 'http'
 import net from 'net'
+import crypto from 'crypto'
 
 // Writable data dir for the packaged app (config.json, run.log, user data).
 // Lives in the user's home so it survives app updates and avoids writing into
@@ -92,6 +93,11 @@ export class PythonBackend extends EventEmitter {
   // guess it has to make.
   private portReady: Promise<number>
   private markPortReady!: (port: number) => void
+  // Shared secret between this shell and the backend it spawns. Passed to the
+  // backend via COW_DESKTOP_TOKEN and echoed by the renderer on requests that
+  // only the desktop may make (importing an attachment by local path). Fixed
+  // for the life of the shell so a backend restart doesn't invalidate it.
+  private readonly desktopToken = crypto.randomBytes(24).toString('hex')
   // Rolling tail of backend output. A startup that never reaches "ready" is
   // otherwise reported as a bare timeout, and the actual cause (a bind error, a
   // config exception) is only visible in run.log — which the user can't open
@@ -164,6 +170,10 @@ export class PythonBackend extends EventEmitter {
    */
   getDataDir(): string {
     return this.packaged ? COW_DATA_DIR : this.backendPath
+  }
+
+  getDesktopToken(): string {
+    return this.desktopToken
   }
 
   // Optional runtime-origin tag from the bundled app-config, forwarded to the
@@ -785,6 +795,7 @@ export class PythonBackend extends EventEmitter {
         // The shell owns the port: tell the backend to bind exactly here so the
         // two sides can never disagree (and we avoid the 9899 web-console clash).
         COW_WEB_PORT: String(this.port),
+        COW_DESKTOP_TOKEN: this.desktopToken,
         ...(bundled ? { COW_DATA_DIR } : {}),
         ...(this.clientSource() ? { COW_CLIENT_SOURCE: this.clientSource() } : {}),
         COW_CLIENT_VERSION: app.getVersion(),
