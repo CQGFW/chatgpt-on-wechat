@@ -569,7 +569,7 @@ class FeiShuChanel(ChatChannel):
 
         from agent.tools.scheduler.task_store import TaskStore
 
-        return TaskStore(str(state_dir.scheduler_file()))
+        return TaskStore(str(state_dir.scheduler_file_global()))
 
     def _send_scheduler_card(self, feishu_msg, is_group: bool, receive_id_type: str) -> bool:
         """Reply to ``/tasks`` with tasks scoped to the current chat."""

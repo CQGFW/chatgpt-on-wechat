@@ -424,9 +424,9 @@ class CowCliPlugin(Plugin):
         task_store = get_task_store()
         if task_store is None:
             from agent.tools.scheduler.task_store import TaskStore
-            from common.state_dir import scheduler_file
+            from common.state_dir import scheduler_file_global
 
-            task_store = TaskStore(str(scheduler_file()))
+            task_store = TaskStore(str(scheduler_file_global()))
 
         channel_type = ""
         receiver = ""

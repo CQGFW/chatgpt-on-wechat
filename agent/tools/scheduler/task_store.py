@@ -178,21 +178,40 @@ class TaskStore:
         tasks = self.load_tasks()
         return tasks.get(task_id)
     
-    def list_tasks(self, enabled_only: bool = False) -> List[dict]:
+    def list_tasks(self, enabled_only: bool = False, agent_id: str = None) -> List[dict]:
         """
         List all tasks
-        
+
         Args:
             enabled_only: If True, only return enabled tasks
-            
+            agent_id: If given, only return tasks owned by this Agent. Ownership
+                is the task's *effective* owner: for an IM task that is the
+                delivery instance's current binding (so re-binding a channel
+                re-buckets its tasks with no data change), else the stored
+                ``agent_id``, else the default Agent. This keeps the per-Agent
+                list identical to what actually runs.
+
         Returns:
             List of task dictionaries
         """
         tasks = self.load_tasks()
         task_list = list(tasks.values())
-        
+
         if enabled_only:
             task_list = [t for t in task_list if t.get("enabled", True)]
+
+        if agent_id:
+            from agent.tools.scheduler.integration import effective_task_agent_id
+            default_id = ""
+            try:
+                from agent.registry import get_agent_registry
+                default_id = get_agent_registry().default_agent_id
+            except Exception:
+                pass
+            task_list = [
+                t for t in task_list
+                if (effective_task_agent_id(t) or default_id) == agent_id
+            ]
         
         # Sort by enabled status (enabled first), then by next_run_at
         def sort_key(t):

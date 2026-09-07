@@ -32,7 +32,7 @@ class SchedulerTool(BaseTool):
         "- cron: cron表达式，如'0 8 * * *'表示每天8点\n\n"
         "注意：'X秒后'用once+相对时间，'每X秒'用interval\n"
         "For Web cross-channel delivery, call action='list_recipients' first, "
-        "then create a fixed-message task using the returned channel_type and receiver."
+        "then create a task (fixed message or ai_task) using the returned channel_type and receiver."
     )
     params: dict = {
         "type": "object",
@@ -77,7 +77,11 @@ class SchedulerTool(BaseTool):
             },
             "channel_type": {
                 "type": "string",
-                "description": "Target channel for a Web-created fixed-message task. Use list_recipients first."
+                "description": "Target channel type for a Web-created cross-channel task. Use list_recipients first."
+            },
+            "instance_id": {
+                "type": "string",
+                "description": "The specific channel instance the recipient belongs to, as returned by list_recipients. Required when a channel type runs more than one instance; the same receiver on two instances is two different targets. Omit for a single-instance channel."
             },
             "receiver": {
                 "type": "string",
@@ -179,17 +183,19 @@ class SchedulerTool(BaseTool):
 
         target_channel = kwargs.get("channel_type")
         target_receiver = kwargs.get("receiver")
+        # A channel type can run several instances; delivery must go back through
+        # the exact one that saw the contact. When the caller does not name an
+        # instance (legacy single-instance channel), it equals the channel type.
+        target_instance = kwargs.get("instance_id") or target_channel
         target = None
         if target_channel or target_receiver:
             if context.get("channel_type") != "web":
                 return "Error: cross-channel recipients can only be selected from the Web console"
             if not target_channel or not target_receiver:
                 return "Error: channel_type and receiver must be provided together"
-            if ai_task:
-                return "Error: cross-channel delivery currently supports fixed messages only"
             if not self.recipient_store:
                 return "Error: trusted recipient directory is unavailable"
-            target = self.recipient_store.get(target_channel, target_receiver)
+            target = self.recipient_store.get(target_instance, target_receiver)
             if not target:
                 return "Error: target is not in the trusted recipient directory; use list_recipients"
         
@@ -204,6 +210,12 @@ class SchedulerTool(BaseTool):
         receiver_name = target["name"] if target else self._get_receiver_name(context)
         is_group = target["is_group"] if target else context.get("isgroup", False)
         channel_type = target["channel_type"] if target else self.config.get("channel_type", "unknown")
+        # The instance to deliver back through: the target's own for a
+        # cross-channel task, else this conversation's. Defaults to the channel
+        # type so a legacy single-instance channel keeps resolving as before.
+        instance_id = (
+            target.get("instance_id") if target else context.get("instance_id")
+        ) or channel_type
 
         # Build action based on message or ai_task
         if message:
@@ -214,6 +226,7 @@ class SchedulerTool(BaseTool):
                 "receiver_name": receiver_name,
                 "is_group": is_group,
                 "channel_type": channel_type,
+                "instance_id": instance_id,
                 "notify_session_id": notify_session_id,
             }
         else:  # ai_task
@@ -224,6 +237,7 @@ class SchedulerTool(BaseTool):
                 "receiver_name": receiver_name,
                 "is_group": is_group,
                 "channel_type": channel_type,
+                "instance_id": instance_id,
                 "notify_session_id": notify_session_id,
             }
             # silent only applies to ai_task; fixed messages always deliver
@@ -235,9 +249,15 @@ class SchedulerTool(BaseTool):
         if msg and hasattr(msg, 'sender_staff_id') and not context.get("isgroup", False):
             action["dingtalk_sender_staff_id"] = msg.sender_staff_id
         
+        # The Agent this task runs as. Stored on the task (not implied by which
+        # file it lives in) so the global scheduler can scope execution to it and
+        # so re-binding a channel instance to a different Agent never moves data.
+        owner_agent_id = self._resolve_owner_agent_id(context, target)
+
         task_data = {
             "id": task_id,
             "name": name,
+            "agent_id": owner_agent_id,
             "enabled": True,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
@@ -309,9 +329,10 @@ class SchedulerTool(BaseTool):
         lines = ["Trusted scheduler recipients:"]
         for item in recipients:
             kind = "group" if item["is_group"] else "user"
+            instance_id = item.get("instance_id") or item["channel_type"]
             lines.append(
                 f"- {item['name']} ({kind}): channel_type={item['channel_type']}, "
-                f"receiver={item['receiver']}"
+                f"instance_id={instance_id}, receiver={item['receiver']}"
             )
         return "\n".join(lines)
     
@@ -517,3 +538,43 @@ class SchedulerTool(BaseTool):
         except Exception:
             pass
         return "未知"
+
+    def _resolve_owner_agent_id(self, context: Context, target: Optional[dict]) -> str:
+        """Which Agent the new task runs as.
+
+        For a cross-channel task the owner is the Agent the target's channel
+        instance is bound to (delivery and identity should match how an inbound
+        message from that instance would route). For a normal conversation task
+        it is simply the Agent handling this conversation. Falls back to the
+        ambient runtime identity, then the default Agent.
+        """
+        # Cross-channel: derive from the target instance's binding.
+        if target:
+            iid = (target.get("instance_id") or "").strip()
+            if iid:
+                try:
+                    from channel.channel_instances import get_instance
+                    from config import conf as _conf
+
+                    inst = get_instance(_conf(), iid)
+                    if inst and getattr(inst, "agent_id", ""):
+                        return inst.agent_id
+                except Exception:
+                    pass
+        # Conversation task: the Agent on the context, else ambient identity.
+        agent_id = (context.get("agent_id") if context else "") or ""
+        if not agent_id:
+            try:
+                from common.runtime_identity import current_identity
+
+                agent_id = current_identity().agent_id or ""
+            except Exception:
+                agent_id = ""
+        if agent_id:
+            return agent_id
+        try:
+            from agent.registry import get_agent_registry
+
+            return get_agent_registry().default_agent_id
+        except Exception:
+            return ""

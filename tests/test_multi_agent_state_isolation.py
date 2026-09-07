@@ -119,31 +119,79 @@ def test_memory_config_keeps_each_agent_index_under_its_workspace(
     assert research_db == Path(research.workspace) / "memory/long-term/index.db"
 
 
-def test_scheduler_stores_allow_same_task_id_per_agent(isolated_registry):
+def test_scheduler_is_one_global_store_tagged_by_agent_id(isolated_registry):
+    """Tasks for every Agent live in one file; ownership is a field, not a path.
+    Re-binding a channel instance therefore never has to move a task."""
     class Bridge:
         agent_registry = isolated_registry
 
     bridge = Bridge()
-    for profile in isolated_registry.list(include_disabled=False):
-        assert init_scheduler(bridge, profile.workspace, profile.id)
+    assert init_scheduler(bridge)
 
-    primary_store = get_task_store(agent_id="primary")
-    research_store = get_task_store(agent_id="research")
-    primary_store.add_task(_task("daily", "Primary daily"))
-    research_store.add_task(_task("daily", "Research daily"))
+    store = get_task_store()
+    primary = _task("daily-p", "Primary daily")
+    primary["agent_id"] = "primary"
+    research = _task("daily-r", "Research daily")
+    research["agent_id"] = "research"
+    store.add_task(primary)
+    store.add_task(research)
 
-    assert primary_store is not research_store
-    assert primary_store.get_task("daily")["name"] == "Primary daily"
-    assert research_store.get_task("daily")["name"] == "Research daily"
-    assert Path(primary_store.store_path) == Path(
-        isolated_registry.get("primary").workspace
-    ) / "scheduler/tasks.json"
-    assert Path(research_store.store_path) == Path(
-        isolated_registry.get("research").workspace
-    ) / "scheduler/tasks.json"
-    assert get_scheduler_service(agent_id="primary") is not get_scheduler_service(
+    assert get_task_store(agent_id="primary") is store
+    assert get_task_store(agent_id="research") is store
+    assert get_scheduler_service(agent_id="primary") is get_scheduler_service(
         agent_id="research"
     )
+    assert [t["id"] for t in store.list_tasks(agent_id="primary")] == ["daily-p"]
+    assert [t["id"] for t in store.list_tasks(agent_id="research")] == ["daily-r"]
+    assert Path(store.store_path) == Path(
+        isolated_registry.get("primary").workspace
+    ) / "scheduler/tasks.json"
+
+
+def test_legacy_per_agent_task_files_fold_into_the_global_store(isolated_registry):
+    """A one-time boot migration imports each Agent's old tasks.json, stamps
+    ``agent_id``, and leaves the source renamed aside — not deleted, so a
+    rollback is possible. The default Agent's file *is* the global store, so
+    those tasks stay put and only get an owner stamp."""
+    import json
+
+    class Bridge:
+        agent_registry = isolated_registry
+
+    primary = isolated_registry.get("primary")
+    research = isolated_registry.get("research")
+    global_path = Path(primary.workspace) / "scheduler" / "tasks.json"
+    legacy_path = Path(research.workspace) / "scheduler" / "tasks.json"
+    global_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    global_path.write_text(
+        json.dumps({"version": 1, "tasks": {"old-p": _task("old-p", "Default leftover")}}),
+        encoding="utf-8",
+    )
+    legacy_path.write_text(
+        json.dumps({"version": 1, "tasks": {"old-r": _task("old-r", "Research leftover")}}),
+        encoding="utf-8",
+    )
+
+    assert init_scheduler(Bridge())
+    store = get_task_store()
+    assert store.get_task("old-p")["agent_id"] == "primary"
+    assert store.get_task("old-r")["agent_id"] == "research"
+    assert store.get_task("old-r")["name"] == "Research leftover"
+    assert not legacy_path.exists()
+    assert legacy_path.with_name("tasks.json.migrated").exists()
+
+
+def test_list_tasks_treats_missing_agent_id_as_the_default(isolated_registry):
+    class Bridge:
+        agent_registry = isolated_registry
+
+    assert init_scheduler(Bridge())
+    store = get_task_store()
+    store.add_task(_task("orphan", "No owner field"))
+
+    assert [t["id"] for t in store.list_tasks(agent_id="primary")] == ["orphan"]
+    assert store.list_tasks(agent_id="research") == []
 
 
 def test_each_agent_boots_only_its_own_mcp_servers(mcp_workspaces, monkeypatch):
