@@ -1,0 +1,79 @@
+---
+title: v2.1.8
+description: CowAgent 2.1.8：推出多 Agent 团队，新增上下文用量与自动压缩、模型故障回退，以及文档就地编辑
+---
+
+🌐 [English](https://docs.cowagent.ai/releases/v2.1.8) | [中文](https://docs.cowagent.ai/zh/releases/v2.1.8)
+
+## 🤝 多 Agent 团队
+
+CowAgent 不再局限于单个 Agent。现在可以创建多个 Agent 组成团队，各自拥有独立的职责、模型、技能和知识，既能单独工作，也能在同一会话中协作完成复杂任务。Web 控制台与桌面客户端均已支持：
+
+- **团队管理**：以独立的「智能体团队」页面创建和维护 Agent，配置名称、头像、职责与默认模型，并可从已有 Agent 复制配置作为起点。
+- **群聊协作**：在一个会话中加入多个 Agent，通过 `@` 指定成员应答；每个 Agent 使用各自配置的模型，气泡上标注发言者。
+- **委派机制**：群聊设有主 Agent（负责人），可将不属于自己领域的任务转交给更合适的成员，支持多跳委派并受范围、深度与时长约束。
+- **资源隔离**：每个 Agent 拥有独立的工作空间、记忆与会话；知识库可在共享与独立之间切换，切回共享时独立库内容予以保留。
+- **通道多实例**：同一种通道可运行多个实例，分别绑定不同的 Agent 或团队，对外呈现为各自独立的助手；绑定改动即时生效，无需重启。支持微信、企业微信机器人、钉钉、飞书、QQ、Telegram、Slack、Discord 等。
+- **分 Agent 视图**：知识、记忆、定时任务页面均按所属 Agent 区分展示，任务列表带负责人标签。
+
+Thanks @AaronZ345 (#2975, #2973)、@zkjqd (#3096)、@cowagent (#3118)
+
+<Frame>
+  {/* 截图占位：「智能体团队」页面全景，左侧成员列表 + 右侧详情 */}
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/zh/cow-team-overview.png" width="800" />
+</Frame>
+
+相关文档：[Agent 团队](https://docs.cowagent.ai/zh/multi-agent/team)
+
+## 📊 上下文用量与自动压缩
+
+对话上下文的占用现在可视、可控，长对话不再因超出窗口而中断：
+
+- **用量指示器**：清除上下文按钮上以环形图展示当前上下文占用，可查看构成明细。
+- **自动压缩**：占用接近上限时自动压缩历史，也可在需要时手动触发同步压缩。
+- **按模型推算预算**：上下文预算依据所选模型自动推导，`agent_max_context_tokens` 作为可选的成本上限。
+
+Thanks @chimyves (#3087)、@sufan721 (#3079)
+
+<Frame>
+  {/* 截图占位：清除上下文按钮上的上下文用量环形图 */}
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/zh/cow-context-usage.png" width="600" />
+</Frame>
+
+## 🤖 模型能力
+
+- **新增模型**：接入 `claude-fable-5-1`、`qwen3.8-flash`、`glm-5.3-flash`，以及视觉模型 `deepseek-v4-flash-vision-exp`（Thanks @a1094174619 #3094）。
+- **模型故障回退**：可配置备用模型，当主模型整轮失败（密钥失效、服务不可用等）时自动切换，避免因单一厂商故障而中断。Thanks @alanyz106 (#3099)
+- **新增搜索厂商**：联网搜索接入 AnySearch（Thanks @WangPan59 #3083）、Serply（Thanks @googio #3071）与 Parallel Search（Thanks @georgeatparallel #3116）。
+
+## 📝 工作空间文件编辑
+
+工作空间文件、记忆文档与技能定义支持在预览界面直接编辑，并在切换时对未保存的改动发起确认：
+
+Thanks @zkjqd (#3076)
+
+## 🛠 优化与修复
+
+- **记忆分块**：Markdown 记忆与知识文档按标题分块，并在分块版本过期时提示重建。Thanks @alanyz106 (#3115)
+- **备份恢复**：备份纳入全部 Agent 工作空间，修正多 Agent 场景下的嵌套归档、恢复布局与版本兼容。
+- **定时任务**：修复并发更新任务丢失的问题（Thanks @Whxuan0701 #3062）。
+- **技能修复**：加固 tar 归档解压（Thanks @Whxuan0701 #3063）；安装技能时解析仓库默认分支而非默认使用 `main`（Thanks @aniruddhaadak80 #3080）；`/skill list` 按 Agent 区分并清理未安装技能。
+- **MCP 增强**：支持工具名前缀（Thanks @georgeatparallel #3116）；恢复过期的 Streamable HTTP 会话（Thanks @yiheng-kkk ad1f686）；多个 Agent 共用同一 `mcp.json` 时复用子进程、去除重复加载日志。
+- **子 Agent 修复**：修复子 Agent 会清空父级会话回退设置的问题（Thanks @alanyz106 #3111）。
+- **图像生成**：修复 ModelScope `IMAGE_CREATE` 因参数不匹配而报错的问题（Thanks @Anai-Guo #3097）。
+- **中断识别**：向 Agent 循环透传 `stop_reason`，以区分模型主动结束与被输出上限截断（Thanks @6vision #3074）。
+- **附件识别**：按解析后的路径判断关键词附件 URL（Thanks @Whxuan0701 #3061）。
+- **网关归属**：为 OrcaRouter 网关请求补充来源归属（Thanks @Marc-oss-hub #3058）。
+- **代理渲染**：为 `/chat` 设置 Content-Type，使控制台在带 nosniff 的反向代理后正常渲染（Thanks @alanyz106 #3110）。
+- **头像处理**：修复上传头像因按文本解码而失败的问题，改为读取原始字节（Thanks @mengluo04）。
+- **钉钉通道**：流式连接禁用代理并对重连做退避，消除持续报错。
+- **Windows 客户端**：修复更新安装破坏快捷方式的问题。
+- **评估工具**：新增最小化的 Agent 轨迹评估流程。Thanks @yanzhiliaoliao (#3100)
+- **文档**：日语文档语言切换器补充繁体中文入口（Thanks @c020627 #3072）；补充 Kimi 相关链接（Thanks @oriengy #2885）。
+
+## 📦 升级方式
+
+- **源码部署**：执行 `cow update` 一键升级，或手动拉取代码后重启。详见 [更新升级文档](https://docs.cowagent.ai/zh/guide/upgrade)。
+- **桌面客户端**：可在客户端内自动检查并一键更新，或前往 [下载页](https://cowagent.ai/zh/download/) 获取最新版本。
+
+**发布日期**：2026.09.07 | [Full Changelog](https://github.com/zhayujie/CowAgent/compare/2.1.7...2.1.8)
