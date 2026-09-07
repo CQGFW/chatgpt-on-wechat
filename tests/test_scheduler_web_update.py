@@ -49,11 +49,11 @@ def _store_task(tmp_path, action):
     return store
 
 
-def _post_update(tmp_path, payload):
+def _post_update(store, payload):
     with patch("channel.web.web_channel._require_auth"), \
          patch("channel.web.web_channel.web.header"), \
          patch("channel.web.web_channel.web.data", return_value=json.dumps(payload).encode()), \
-         patch("channel.web.web_channel._get_workspace_root", return_value=str(tmp_path)):
+         patch("channel.web.web_channel._global_task_store", return_value=store):
         return json.loads(SchedulerUpdateHandler().POST())
 
 
@@ -102,10 +102,12 @@ def test_manual_run_is_exposed_by_explicit_web_and_desktop_controls():
     assert "fetch('/api/scheduler/run'" in web_console
     web_run = web_console[web_console.index("function runTaskNow(task, button)"):]
     assert "showConfirmDialog({" in web_run[:2500]
-    assert "async runTask(taskId: string)" in desktop_client
+    assert "async runTask(taskId: string" in desktop_client
     assert "'/api/scheduler/run'" in desktop_client
     assert "const runNow = async ()" in desktop_page
-    assert "window.confirm(t('task_run_confirm'))" in desktop_page
+    # Desktop confirms via the app's custom dialog (askConfirm), matching the web
+    # console's showConfirmDialog rather than a native window.confirm.
+    assert "askConfirm({ titleKey: 'task_run_now'" in desktop_page
 
 
 def test_web_edit_preserves_hidden_agent_action_fields(tmp_path):
@@ -121,7 +123,7 @@ def test_web_edit_preserves_hidden_agent_action_fields(tmp_path):
         "delivery_extension": {"trace": True},
     })
 
-    result = _post_update(tmp_path, {
+    result = _post_update(store, {
         "task_id": "task-1",
         "name": "renamed maintenance",
         "action": {
@@ -150,7 +152,7 @@ def test_switch_to_message_drops_agent_only_fields(tmp_path):
         "silent": True,
     })
 
-    result = _post_update(tmp_path, {
+    result = _post_update(store, {
         "task_id": "task-1",
         "action": {
             "type": "send_message",
@@ -168,40 +170,31 @@ def test_switch_to_message_drops_agent_only_fields(tmp_path):
     assert action["notify_session_id"] == "session-1"
 
 
-def _seed_agent_task(dir_path, task_id):
+def _seed_global_tasks(dir_path, items):
     store = TaskStore(str(dir_path / "scheduler" / "tasks.json"))
-    store.add_task({
-        "id": task_id,
-        "name": task_id,
-        "enabled": True,
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-        "schedule": {"type": "interval", "seconds": 3600},
-        "action": {"type": "agent_task", "task_description": "x"},
-    })
+    for task_id, agent_id in items:
+        store.add_task({
+            "id": task_id,
+            "name": task_id,
+            "agent_id": agent_id,
+            "enabled": True,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+            "schedule": {"type": "interval", "seconds": 3600},
+            "action": {"type": "agent_task", "task_description": "x"},
+        })
+    return store
 
 
 def test_list_aggregates_every_agent_and_tags_the_owner(tmp_path):
-    """Without an explicit agent_id the list spans the whole team, and each task
-    carries the id of the Agent whose store it came from."""
-    primary = tmp_path / "primary"
-    research = tmp_path / "research"
-    _seed_agent_task(primary, "p-task")
-    _seed_agent_task(research, "r-task")
-
-    registry = types.SimpleNamespace(
-        list=lambda include_disabled=False: [
-            types.SimpleNamespace(id="primary"),
-            types.SimpleNamespace(id="research"),
-        ]
-    )
-    roots = {"primary": str(primary), "research": str(research)}
+    """Without an explicit agent_id the list spans the whole team; each task
+    carries the ``agent_id`` stored on the row, not implied by a file path."""
+    store = _seed_global_tasks(tmp_path, [("p-task", "primary"), ("r-task", "research")])
 
     with patch("channel.web.web_channel._require_auth"), \
          patch("channel.web.web_channel.web.header"), \
          patch("channel.web.web_channel.web.input", return_value=types.SimpleNamespace(agent_id="")), \
-         patch("agent.registry.get_agent_registry", return_value=registry), \
-         patch("channel.web.web_channel._get_workspace_root", side_effect=lambda agent_id=None: roots[agent_id]):
+         patch("channel.web.web_channel._global_task_store", return_value=store):
         response = json.loads(web_channel.SchedulerHandler().GET())
 
     assert response["status"] == "success"
@@ -210,15 +203,13 @@ def test_list_aggregates_every_agent_and_tags_the_owner(tmp_path):
 
 
 def test_list_scopes_to_a_single_agent_when_asked(tmp_path):
-    primary = tmp_path / "primary"
-    research = tmp_path / "research"
-    _seed_agent_task(primary, "p-task")
-    _seed_agent_task(research, "r-task")
+    store = _seed_global_tasks(tmp_path, [("p-task", "primary"), ("r-task", "research")])
 
     with patch("channel.web.web_channel._require_auth"), \
          patch("channel.web.web_channel.web.header"), \
          patch("channel.web.web_channel.web.input", return_value=types.SimpleNamespace(agent_id="research")), \
-         patch("channel.web.web_channel._get_workspace_root", return_value=str(research)):
+         patch("channel.web.web_channel._request_agent_id", return_value="research"), \
+         patch("channel.web.web_channel._global_task_store", return_value=store):
         response = json.loads(web_channel.SchedulerHandler().GET())
 
     assert response["status"] == "success"

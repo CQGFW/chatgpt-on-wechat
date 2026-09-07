@@ -2198,6 +2198,9 @@ class WebChannel(ChatChannel):
             '/api/scheduler/toggle', 'SchedulerToggleHandler',
             '/api/scheduler/update', 'SchedulerUpdateHandler',
             '/api/scheduler/delete', 'SchedulerDeleteHandler',
+            '/api/scheduler/create', 'SchedulerCreateHandler',
+            '/api/scheduler/recipients', 'SchedulerRecipientsHandler',
+            '/api/scheduler/instances', 'SchedulerInstancesHandler',
             '/api/agents', 'AgentsHandler',
             '/api/agents/([^/]+)/avatar', 'AgentAvatarHandler',
             '/api/agents/([^/]+)/files/([^/]+)', 'AgentCoreFileHandler',
@@ -5470,6 +5473,8 @@ class ChannelsHandler:
                 "instance_id": inst.instance_id,
                 "channel_type": inst.channel_type,
                 "agent_id": inst.agent_id or "",
+                # User-editable label; empty falls back client-side to the id.
+                "instance_name": inst.name or "",
                 "members": list(inst.members or []),
                 "label": label_val,
                 "icon": ch_def["icon"],
@@ -5580,6 +5585,8 @@ class ChannelsHandler:
                     return self._handle_instance_connect(channel_name, instance_id, body.get("config", {}))
                 elif action == "disconnect":
                     return self._handle_instance_disconnect(channel_name, instance_id)
+                elif action == "rename":
+                    return self._handle_instance_rename(channel_name, instance_id, body.get("name", ""))
                 else:
                     return json.dumps({"status": "error", "message": f"unknown action: {action}"})
 
@@ -5910,6 +5917,25 @@ class ChannelsHandler:
             f"restart={'yes' if changed else 'no'}"
         )
         return json.dumps({"status": "success", "instance_id": inst.instance_id}, ensure_ascii=False)
+
+    def _handle_instance_rename(self, channel_name: str, instance_id: str, name):
+        """Set an instance's friendly label. Does not touch credentials or the
+        live connection, so renaming never interrupts a running channel."""
+        from channel.channel_instances import upsert_instance
+
+        if not instance_id:
+            return json.dumps({"status": "error", "message": "instance_id is required"})
+        inst = upsert_instance(
+            conf(),
+            channel_type=channel_name,
+            instance_id=instance_id,
+            name=str(name or ""),
+        )
+        logger.info(f"[WebChannel] Channel instance '{inst.instance_id}' renamed to '{inst.name}'")
+        return json.dumps(
+            {"status": "success", "instance_id": inst.instance_id, "name": inst.name},
+            ensure_ascii=False,
+        )
 
     def _handle_instance_disconnect(self, channel_name: str, instance_id: str):
         """Remove one instance record from team.json and stop its channel."""
@@ -6302,6 +6328,18 @@ def _request_agent_id(source) -> str:
     return value or None
 
 
+def _resolve_instance_agent_id(instance_id: str) -> str:
+    """The Agent a channel instance is currently bound to, or "" for none.
+
+    Thin alias over the scheduler's resolver so there is one implementation of
+    "which Agent owns this instance" shared by task execution, the task list,
+    and task creation. A legacy single-instance channel (instance_id ==
+    channel_type) has no explicit binding and resolves to "" -> default Agent.
+    """
+    from agent.tools.scheduler.integration import _resolve_instance_agent_id as _resolve
+    return _resolve(instance_id)
+
+
 class ToolsHandler:
     def GET(self):
         _require_auth()
@@ -6505,40 +6543,45 @@ class MemoryContentHandler:
             return json.dumps({"status": "error", "message": str(e)})
 
 
+def _global_task_store():
+    """The one global task store the console reads and writes.
+
+    All Agents' tasks live in a single file now (each task carries its own
+    ``agent_id``), so handlers no longer resolve a per-Agent workspace path.
+    """
+    from agent.tools.scheduler.integration import get_task_store
+    return get_task_store()
+
+
 class SchedulerHandler:
     def GET(self):
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            from agent.tools.scheduler.task_store import TaskStore
             params = web.input(agent_id='')
             requested = _request_agent_id(params)
 
-            # An explicit agent_id scopes the list to that Agent (unchanged
-            # behaviour for callers that already target one). Without it the
-            # list aggregates every Agent's tasks so the console shows the whole
-            # team's schedule, each task tagged with the Agent that owns it —
-            # the owner is otherwise only implicit in which file it lives in.
-            if requested:
-                agents = [requested]
-            else:
-                from agent.registry import get_agent_registry
-                agents = [p.id for p in get_agent_registry().list(include_disabled=False)]
+            store = _global_task_store()
+            if store is None:
+                return json.dumps({"status": "success", "tasks": []}, ensure_ascii=False)
 
-            tasks = []
-            for agent_id in agents:
-                try:
-                    workspace_root = _get_workspace_root(agent_id=agent_id)
-                except Exception as e:
-                    logger.debug(f"[WebChannel] Scheduler skip agent {agent_id}: {e}")
-                    continue
-                store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
-                for task in TaskStore(store_path).list_tasks():
-                    # Tag the owner so the frontend can show it and so write
-                    # operations (run/toggle/update/delete) route back to the
-                    # right Agent's store rather than defaulting to the default.
-                    task["agent_id"] = agent_id
-                    tasks.append(task)
+            # An explicit agent_id scopes the list to that Agent; without it the
+            # console shows the whole team's schedule.
+            tasks = store.list_tasks(agent_id=requested or None)
+            # Stamp each task with its *effective* owner so the card/owner-chip
+            # always matches what actually runs. For an IM task that is the
+            # delivery instance's current binding (a channel re-bind moves the
+            # owner with zero data migration); for Web / unbound tasks it is the
+            # stored id, defaulting so the client never sees a blank owner it
+            # uses to route mutations.
+            from agent.tools.scheduler.integration import effective_task_agent_id
+            try:
+                from agent.registry import get_agent_registry
+                default_id = get_agent_registry().default_agent_id
+            except Exception:
+                default_id = ""
+            for task in tasks:
+                task["agent_id"] = effective_task_agent_id(task) or default_id
             return json.dumps({"status": "success", "tasks": tasks}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler API error: {e}")
@@ -6584,10 +6627,9 @@ class SchedulerToggleHandler:
             enabled = body.get("enabled", True)
             if not task_id:
                 return json.dumps({"status": "error", "message": "task_id required"})
-            from agent.tools.scheduler.task_store import TaskStore
-            workspace_root = _get_workspace_root(agent_id=_request_agent_id(body))
-            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
-            store = TaskStore(store_path)
+            store = _global_task_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
             store.enable_task(task_id, enabled)
             task = store.get_task(task_id)
             return json.dumps({"status": "success", "task": task}, ensure_ascii=False)
@@ -6606,13 +6648,12 @@ class SchedulerUpdateHandler:
             if not task_id:
                 return json.dumps({"status": "error", "message": "task_id required"})
             
-            from agent.tools.scheduler.task_store import TaskStore
             from agent.tools.scheduler.scheduler_service import SchedulerService
             from datetime import datetime
-            workspace_root = _get_workspace_root(agent_id=_request_agent_id(body))
-            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
-            store = TaskStore(store_path)
-            
+            store = _global_task_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
+
             # Get original task (single query to avoid repeated I/O)
             original_task = store.get_task(task_id)
             if not original_task:
@@ -6674,23 +6715,54 @@ class SchedulerUpdateHandler:
                 old_channel = original_action.get("channel_type", "web")
                 channel_type = action.get("channel_type") or old_channel
                 action["channel_type"] = channel_type
-                
-                # If channel type changed or no receiver, reject the update.
-                # Note: the web UI disables the channel selector, so this branch
-                # is only reachable via direct API calls. Changing a task's channel
-                # after creation is not supported because the receiver identity is
-                # channel-bound and cannot be trivially re-populated (e.g. weixin
-                # requires a valid context_token tied to the original user-session).
-                if old_channel and old_channel != channel_type:
-                    return json.dumps({
-                        "status": "error",
-                        "message": f"Cannot change channel type from '{old_channel}' to '{channel_type}'. Please create a new task on the target channel instead."
-                    }, ensure_ascii=False)
+
                 if not action.get("receiver"):
                     return json.dumps({
                         "status": "error",
                         "message": "Receiver is required. Please create a new task through the chat interface."
                     }, ensure_ascii=False)
+
+                # Web tasks target a chat session, which is not a switchable
+                # delivery identity — freeze channel/receiver for them.
+                if old_channel == "web" or channel_type == "web":
+                    if old_channel != channel_type:
+                        return json.dumps({
+                            "status": "error",
+                            "message": f"Cannot change channel type from '{old_channel}' to '{channel_type}'.",
+                        }, ensure_ascii=False)
+                else:
+                    # IM task: the editor lets the user re-point it at another
+                    # channel instance / recipient. Only allow a target that is
+                    # in the trusted recipient directory, and take its identity
+                    # from the store rather than trusting the request body — the
+                    # same rule the create endpoint enforces. This also keeps an
+                    # app-scoped id (a Feishu open_id) bound to the instance that
+                    # actually owns it.
+                    new_instance = (action.get("instance_id") or channel_type).strip()
+                    new_receiver = action.get("receiver")
+                    changed = (
+                        channel_type != old_channel
+                        or new_instance != (original_action.get("instance_id") or old_channel)
+                        or new_receiver != original_action.get("receiver")
+                    )
+                    if changed:
+                        from agent.tools.scheduler.integration import get_recipient_store
+                        target = get_recipient_store().get(new_instance, new_receiver)
+                        if not target:
+                            return json.dumps({
+                                "status": "error",
+                                "message": "recipient is not in the trusted directory",
+                            }, ensure_ascii=False)
+                        action["channel_type"] = target["channel_type"]
+                        action["instance_id"] = target.get("instance_id") or new_instance
+                        action["receiver"] = target["receiver"]
+                        action["receiver_name"] = target.get("name") or target["receiver"]
+                        action["is_group"] = bool(target.get("is_group", False))
+                        action["notify_session_id"] = target.get("session_id") or target["receiver"]
+                        # No need to touch agent_id: the effective owner of an IM
+                        # task is derived from instance_id's live binding, so
+                        # switching the delivery instance here already moves the
+                        # task to the new instance's Agent on the next tick.
                 updates["action"] = action
                 
                 # If schedule was not updated but action was, ensure next_run_at exists
@@ -6720,14 +6792,268 @@ class SchedulerDeleteHandler:
             if not task_id:
                 return json.dumps({"status": "error", "message": "task_id required"})
             
-            from agent.tools.scheduler.task_store import TaskStore
-            workspace_root = _get_workspace_root(agent_id=_request_agent_id(body))
-            store_path = os.path.join(workspace_root, "scheduler", "tasks.json")
-            store = TaskStore(store_path)
+            store = _global_task_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
             store.delete_task(task_id)
             return json.dumps({"status": "success"}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler delete error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerInstancesHandler:
+    """List channel instances that can be a scheduled-task delivery target.
+
+    The task-create flow picks an instance first, then a recipient within it.
+    This returns every external IM instance (web/unknown excluded, as web is not
+    a stable delivery target), each with a human-friendly name and how many
+    trusted recipients it currently has, so the console can show all instances
+    and note the empty ones rather than hiding them.
+
+    Legacy single-instance installs surface here too: each legacy channel type
+    resolves to one instance whose id equals the type, so an old setup gets one
+    entry per configured channel with no config change.
+    """
+
+    def GET(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            from agent.tools.scheduler.integration import get_recipient_store
+            from channel.channel_instances import (
+                resolve_channel_instances,
+                _CHANNEL_TYPE_LABELS,
+            )
+            from agent import team
+
+            # Count recipients per instance so the picker can flag empty ones.
+            counts = {}
+            for r in get_recipient_store().list():
+                iid = r.get("instance_id") or r.get("channel_type") or ""
+                counts[iid] = counts.get(iid, 0) + 1
+
+            resolved = team.resolve(conf())
+            instances = []
+            seen = set()
+            for inst in resolve_channel_instances(resolved):
+                if inst.channel_type in ("web", "unknown"):
+                    continue
+                if inst.instance_id in seen:
+                    continue
+                seen.add(inst.instance_id)
+                creds = inst.credentials or {}
+                # Prefer the user label; then a credential-carried bot name; then
+                # the type's friendly label (so a legacy install without a name
+                # reads "微信" not "weixin"); finally the raw id.
+                friendly = (
+                    inst.name
+                    or creds.get("feishu_bot_name")
+                    or creds.get("wecom_bot_id")
+                    or _CHANNEL_TYPE_LABELS.get(inst.channel_type)
+                    or inst.instance_id
+                )
+                instances.append({
+                    "instance_id": inst.instance_id,
+                    "channel_type": inst.channel_type,
+                    "name": friendly,
+                    # Friendly channel-type label (e.g. "微信"), shown on the
+                    # right of the picker since the left is the instance name.
+                    "channel_label": _CHANNEL_TYPE_LABELS.get(inst.channel_type, inst.channel_type),
+                    "agent_id": inst.agent_id or "",
+                    "recipient_count": counts.get(inst.instance_id, 0),
+                })
+            return json.dumps({"status": "success", "instances": instances}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler instances error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerRecipientsHandler:
+    """List the trusted cross-channel recipients learned from inbound messages.
+
+    These are people/groups who have already contacted the Agent on an IM
+    channel (feishu / wecom_bot / dingtalk / weixin / ...). The Web console uses
+    this directory to let a user hand-create a scheduled task that delivers to
+    someone on another channel, instead of guessing raw receiver ids.
+
+    Web sessions are intentionally excluded from the directory (they are
+    ephemeral and not stable identities), so this endpoint only ever returns
+    external-channel recipients.
+    """
+
+    def GET(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            from agent.tools.scheduler.integration import get_recipient_store
+
+            # The directory is shared across Agents, so it is one read. Each entry
+            # already carries instance_id (the exact channel login that saw the
+            # person); we enrich it with a human-friendly instance label so the
+            # picker reads as "instance · name". The owning Agent is derived at
+            # create time from the instance, so it is not needed here.
+            recipients = get_recipient_store().list()
+            instance_meta = self._instance_meta()
+            for item in recipients:
+                inst_id = item.get("instance_id") or item.get("channel_type") or ""
+                meta = instance_meta.get(inst_id)
+                item["instance_name"] = (meta or {}).get("name") or inst_id
+            return json.dumps({"status": "success", "recipients": recipients}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler recipients error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+    @staticmethod
+    def _instance_meta():
+        """Map instance_id -> {name} for every configured channel instance, so a
+        recipient can be shown by a readable channel label rather than a raw id.
+        Best-effort: a missing map just falls back to the id."""
+        meta = {}
+        try:
+            from channel.channel_instances import resolve_channel_instances
+            from agent import team
+            resolved = team.resolve(conf())
+            for inst in resolve_channel_instances(resolved):
+                # Prefer the user-set label; then a bot name the channel carries;
+                # else the instance id, which at least names the type.
+                creds = inst.credentials or {}
+                friendly = (
+                    inst.name
+                    or creds.get("feishu_bot_name")
+                    or creds.get("wecom_bot_id")
+                    or inst.instance_id
+                )
+                meta[inst.instance_id] = {"name": friendly}
+        except Exception as e:
+            logger.debug(f"[WebChannel] Instance meta unavailable: {e}")
+        return meta
+
+
+class SchedulerCreateHandler:
+    """Hand-create a scheduled task from the Web console.
+
+    The chat-driven path (SchedulerTool) remains the way to create a task that
+    delivers back to the current conversation. This endpoint exists for the
+    "actively reach someone else" case: the user picks a trusted recipient and
+    the task is stored to deliver on that recipient's channel.
+
+    The recipient is identified by ``instance_id`` (the specific channel instance
+    that saw them), not just a channel type: two instances of one channel type
+    have separate logins and receiver id spaces, and delivery must go back out
+    through the exact instance. The owning Agent is *derived* from that instance's
+    binding rather than chosen separately, since a channel instance already binds
+    to one Agent. A legacy single-instance channel has ``instance_id ==
+    channel_type``, so an old client that only sends a channel type still works.
+
+    Cross-channel delivery is only allowed to a recipient already present in the
+    trusted directory; an arbitrary receiver id is rejected. The recipient's
+    stable identity (receiver_name / is_group / session_id) is filled from the
+    directory rather than trusted from the request body.
+    """
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            import uuid
+            from datetime import datetime
+            from agent.tools.scheduler.scheduler_service import SchedulerService
+            from agent.tools.scheduler.integration import get_recipient_store
+
+            body = json.loads(web.data() or b"{}")
+
+            name = (body.get("name") or "").strip()
+            if not name:
+                return json.dumps({"status": "error", "message": "name is required"})
+
+            schedule = body.get("schedule")
+            if not isinstance(schedule, dict) or not schedule.get("type"):
+                return json.dumps({"status": "error", "message": "schedule is required"})
+
+            action_in = body.get("action")
+            if not isinstance(action_in, dict):
+                return json.dumps({"status": "error", "message": "action is required"})
+
+            action_type = action_in.get("type")
+            if action_type not in ("send_message", "agent_task"):
+                return json.dumps({"status": "error", "message": "unsupported action type"})
+
+            channel_type = (action_in.get("channel_type") or "").strip()
+            receiver = (action_in.get("receiver") or "").strip()
+            # instance_id identifies the exact channel login; fall back to the
+            # channel type for a legacy single-instance channel / older client.
+            instance_id = (action_in.get("instance_id") or "").strip() or channel_type
+            if not channel_type or not receiver:
+                return json.dumps({"status": "error", "message": "channel_type and receiver are required"})
+            if channel_type in ("web", "unknown"):
+                # Web sessions are ephemeral and not a stable delivery target;
+                # the console only creates tasks for external-channel recipients.
+                return json.dumps({"status": "error", "message": "web is not a valid cross-channel recipient"})
+
+            content = (action_in.get("content") or action_in.get("task_description") or "").strip()
+            if not content:
+                return json.dumps({"status": "error", "message": "content is required"})
+
+            # The receiver must be in the shared trusted directory; identity
+            # fields are taken from the store, never trusted from the client.
+            target = get_recipient_store().get(instance_id, receiver)
+            if not target:
+                return json.dumps({
+                    "status": "error",
+                    "message": "recipient is not in the trusted directory",
+                })
+
+            # Record the current owner as a hint only. For an IM task the true
+            # owner is derived at run time from the delivery instance's binding
+            # (see effective_task_agent_id), so re-binding the channel moves the
+            # task with no rewrite; this stored value is just a fallback for when
+            # the instance later has no explicit binding.
+            agent_id = _resolve_instance_agent_id(target.get("instance_id") or instance_id)
+
+            action = {
+                "type": action_type,
+                "receiver": target["receiver"],
+                "receiver_name": target.get("name") or target["receiver"],
+                "is_group": bool(target.get("is_group", False)),
+                "channel_type": target["channel_type"],
+                "instance_id": target.get("instance_id") or instance_id,
+                "notify_session_id": target.get("session_id") or target["receiver"],
+            }
+            if action_type == "send_message":
+                action["content"] = content
+            else:
+                action["task_description"] = content
+                if action_in.get("silent"):
+                    action["silent"] = True
+
+            task_data = {
+                "id": str(uuid.uuid4())[:8],
+                "name": name,
+                "agent_id": agent_id,
+                "enabled": bool(body.get("enabled", True)),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "schedule": schedule,
+                "action": action,
+            }
+
+            store = _global_task_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "Scheduler store unavailable"})
+            temp_service = SchedulerService(store, lambda t: None)
+            next_run = temp_service._calculate_next_run(task_data, datetime.now())
+            if not next_run:
+                return json.dumps({
+                    "status": "error",
+                    "message": "Cannot calculate next run time. Please check the schedule (cron format, or a one-time time already in the past).",
+                }, ensure_ascii=False)
+            task_data["next_run_at"] = next_run.isoformat()
+
+            store.add_task(task_data)
+            return json.dumps({"status": "success", "task": task_data}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler create error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 
@@ -6745,8 +7071,9 @@ def _bind_channel_instance(channel_type: str, instance_id: str = "", agent_id: s
     (falls back to the default Agent).
 
     Rebinding only changes *which* Agent inbound messages route to — the
-    credentials and connection are untouched — so there is no reason to tear
-    down and re-establish the IM link. We persist the new binding and then set
+    credentials, connection, and scheduled tasks are untouched. Tasks live in
+    the global store and carry their own ``agent_id``; flipping this picker
+    must never migrate or rewrite them. We persist the new binding and then set
     ``bound_agent_id`` live on the running channel; the next inbound message
     reads the updated value. This avoids the reconnect storm a restart caused
     when the user flipped the picker a few times.

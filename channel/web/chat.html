@@ -1464,6 +1464,12 @@
                                     <p class="text-sm text-slate-500 dark:text-slate-400 mt-1" data-i18n="tasks_desc">查看和管理定时任务</p>
                                 </div>
                                 <div class="flex items-center gap-2">
+                                    <button id="task-add-btn" onclick="openTaskCreateModal()"
+                                            class="px-3 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white
+                                                   text-sm font-medium cursor-pointer transition-colors duration-150 flex items-center gap-1.5">
+                                        <i class="fas fa-plus text-xs"></i>
+                                        <span data-i18n="task_add_btn">新增任务</span>
+                                    </button>
                                     <button id="task-refresh-btn" onclick="refreshTasksView()"
                                             class="px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10
                                                    text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5
@@ -1622,6 +1628,35 @@
                 <button id="confirm-dialog-ok"
                         class="px-4 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium
                                cursor-pointer transition-colors duration-150"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Channel Instance Rename Modal -->
+    <div id="rename-dialog-overlay" class="fixed inset-0 bg-black/50 z-[200] hidden flex items-center justify-center">
+        <div class="bg-white dark:bg-[#1A1A1A] rounded-2xl border border-slate-200 dark:border-white/10 shadow-xl
+                    w-full max-w-sm mx-4 overflow-hidden">
+            <div class="p-6">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-pen text-primary-500"></i>
+                    </div>
+                    <h3 class="font-semibold text-slate-800 dark:text-slate-100 text-base" data-i18n="channel_rename">重命名通道</h3>
+                </div>
+                <input id="rename-dialog-input" type="text" maxlength="40"
+                       class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
+                              bg-slate-50 dark:bg-[#1A1A1A] text-sm text-slate-800 dark:text-slate-100
+                              focus:outline-none focus:border-primary-500 transition-colors">
+            </div>
+            <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-white/5">
+                <button id="rename-dialog-cancel"
+                        class="px-4 py-2 rounded-lg border border-slate-200 dark:border-white/10
+                               text-slate-600 dark:text-slate-300 text-sm font-medium
+                               hover:bg-slate-50 dark:hover:bg-white/5
+                               cursor-pointer transition-colors duration-150" data-i18n="channels_cancel">取消</button>
+                <button id="rename-dialog-ok"
+                        class="px-4 py-2 rounded-lg bg-primary-500 hover:bg-primary-600 text-white text-sm font-medium
+                               cursor-pointer transition-colors duration-150" data-i18n="channels_save">保存</button>
             </div>
         </div>
     </div>
@@ -1843,16 +1878,13 @@
                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
                                 <span data-i18n="task_schedule_type">调度类型</span>
                             </label>
-                            <select id="task-edit-schedule-type"
-                                    class="w-full px-3 py-2 pr-8 rounded-lg border border-slate-200 dark:border-slate-600
-                                           bg-slate-50 dark:bg-[#1A1A1A] text-sm text-slate-800 dark:text-slate-100
-                                           focus:outline-none focus:border-primary-500 transition-colors
-                                           appearance-none bg-no-repeat bg-right"
-                                    style="background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 20 20%27 fill=%27none%27%3e%3cpath d=%27M7 7l3 3 3-3%27 stroke=%27%23888%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 1.25rem;">
-                                <option value="cron" data-i18n="task_schedule_cron">Cron 表达式</option>
-                                <option value="interval" data-i18n="task_schedule_interval">固定间隔</option>
-                                <option value="once" data-i18n="task_schedule_once">一次性任务</option>
-                            </select>
+                            <div id="task-edit-schedule-type" class="cfg-dropdown" tabindex="0">
+                                <div class="cfg-dropdown-selected">
+                                    <span class="cfg-dropdown-text">--</span>
+                                    <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                </div>
+                                <div class="cfg-dropdown-menu"></div>
+                            </div>
                         </div>
 
                         <!-- Cron 表达式 -->
@@ -1901,37 +1933,65 @@
                         <span data-i18n="task_interval_hint">最小 60 秒，例如 3600 表示每小时执行一次</span>
                     </p>
 
-                    <!-- 动作类型 + 通道类型 -->
+                    <!-- 任务类型 + 通道 -->
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
-                                <span data-i18n="task_action_type">动作类型</span>
+                                <span data-i18n="task_action_type">任务类型</span>
                             </label>
-                            <select id="task-edit-action-type"
-                                    class="w-full px-3 py-2 pr-8 rounded-lg border border-slate-200 dark:border-slate-600
-                                           bg-slate-50 dark:bg-[#1A1A1A] text-sm text-slate-800 dark:text-slate-100
-                                           focus:outline-none focus:border-primary-500 transition-colors
-                                           appearance-none bg-no-repeat bg-right"
-                                    style="background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 20 20%27 fill=%27none%27%3e%3cpath d=%27M7 7l3 3 3-3%27 stroke=%27%23888%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 1.25rem;">
-                                <option value="send_message" data-i18n="task_action_send_message">发送消息</option>
-                                <option value="agent_task" data-i18n="task_action_agent_task">AI 任务</option>
-                            </select>
+                            <div id="task-edit-action-type" class="cfg-dropdown" tabindex="0">
+                                <div class="cfg-dropdown-selected">
+                                    <span class="cfg-dropdown-text">--</span>
+                                    <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                </div>
+                                <div class="cfg-dropdown-menu"></div>
+                            </div>
                         </div>
+                        <!-- 通道格子：新增任务时是可选的通道实例；编辑任务时是只读的通道类型 -->
                         <div>
-                            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
-                                <span data-i18n="task_channel_type">通道类型</span>
+                            <label class="flex items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                                <span data-i18n="task_instance">通道</span>
+                                <span id="task-instance-tip" class="cfg-tip" data-tip-key="task_instance_tip"><i class="fas fa-circle-question"></i></span>
                             </label>
-                            <select id="task-edit-channel-type"
-                                    class="w-full px-3 py-2 pr-8 rounded-lg border border-slate-200 dark:border-slate-600
-                                           bg-slate-50 dark:bg-[#1A1A1A] text-sm text-slate-800 dark:text-slate-100
-                                           focus:outline-none focus:border-primary-500 transition-colors
-                                           appearance-none bg-no-repeat bg-right
-                                           disabled:opacity-100 disabled:text-slate-800 dark:disabled:text-slate-300 disabled:bg-slate-100 dark:disabled:bg-[#252525] disabled:cursor-not-allowed"
-                                    style="background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 20 20%27 fill=%27none%27%3e%3cpath d=%27M7 7l3 3 3-3%27 stroke=%27%23888%27 stroke-width=%272%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3e%3c/svg%3e'); background-position: right 0.5rem center; background-size: 1.25rem;">
-                            </select>
-                            <p class="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                                <span data-i18n="task_channel_hint">选择定时消息发送的通道</span>
-                            </p>
+                            <!-- 新增模式：选择通道实例 -->
+                            <div id="task-edit-instance-wrap">
+                                <div id="task-edit-instance" class="cfg-dropdown" tabindex="0">
+                                    <div class="cfg-dropdown-selected">
+                                        <span class="cfg-dropdown-text">--</span>
+                                        <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                    </div>
+                                    <div class="cfg-dropdown-menu"></div>
+                                </div>
+                            </div>
+                            <!-- 编辑模式：只读通道类型 -->
+                            <div id="task-edit-channel-wrap" class="hidden">
+                                <div id="task-edit-channel-type" class="cfg-dropdown cfg-dropdown-disabled" tabindex="-1">
+                                    <div class="cfg-dropdown-selected">
+                                        <span class="cfg-dropdown-text">--</span>
+                                        <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                                    </div>
+                                    <div class="cfg-dropdown-menu"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 接收人选择（仅新增任务、且已选通道后显示） -->
+                    <div id="task-edit-recipient-wrap" class="hidden">
+                        <label class="flex items-center gap-1.5 text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">
+                            <span data-i18n="task_recipient">接收人</span>
+                            <button type="button" id="task-recipient-refresh" onclick="refreshTaskRecipients()"
+                                    data-tip-key="task_recipient_refresh"
+                                    class="text-slate-400 hover:text-primary-500 cursor-pointer transition-colors">
+                                <i class="fas fa-rotate-right text-xs"></i>
+                            </button>
+                        </label>
+                        <div id="task-edit-recipient" class="cfg-dropdown" tabindex="0">
+                            <div class="cfg-dropdown-selected">
+                                <span class="cfg-dropdown-text">--</span>
+                                <i class="fas fa-chevron-down cfg-dropdown-arrow"></i>
+                            </div>
+                            <div class="cfg-dropdown-menu"></div>
                         </div>
                     </div>
 

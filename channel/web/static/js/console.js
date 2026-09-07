@@ -273,6 +273,7 @@ const I18N = {
         channels_save: '保存配置', channels_saved: '已保存', channels_save_error: '保存失败',
         channels_restarted: '已保存并重启',
         channels_connect_btn: '接入', channels_cancel: '取消',
+        channel_rename: '重命名通道',
         channels_select_placeholder: '选择要接入的通道...',
         channels_empty: '暂未接入任何通道', channels_empty_desc: '点击右上角「接入通道」按钮开始配置',
         channels_disconnect_confirm: '确认断开该通道？配置将保留但通道会停止运行。',
@@ -317,12 +318,13 @@ const I18N = {
         task_interval_seconds: '间隔秒数',
         task_interval_hint: '最小 60 秒，例如 3600 表示每小时执行一次',
         task_once_time: '执行时间',
-        task_action_type: '动作类型',
-        task_action_send_message: '发送消息',
+        task_action_type: '任务类型',
+        task_action_send_message: '固定消息',
         task_action_agent_task: 'AI 任务',
         task_channel_type: '通道类型',
         task_channel_hint: '选择定时消息发送的通道',
         task_message_content: '消息内容',
+        task_fixed_content: '固定内容',
         task_task_description: '任务描述',
         task_delete_btn: '删除任务',
         task_delete_confirm_title: '删除定时任务',
@@ -332,6 +334,25 @@ const I18N = {
         task_run_confirm_msg: '该任务会立即向已配置的通道和接收者发送内容。是否继续？',
         task_run_started: '已开始执行',
         task_run_failed: '执行失败',
+        task_add_title: '新增定时任务',
+        task_add_btn: '新增任务',
+        task_recipient: '接收人',
+        task_recipient_hint: '先选择通道，再选择该通道下已联系过的联系人，任务将主动推送给 TA',
+        task_recipient_select: '选择接收人',
+        task_recipient_empty: '暂无可选接收人。对方需先通过通道（飞书/企业微信等）联系过智能体。',
+        task_recipient_group: '群聊',
+        task_recipient_user: '用户',
+        task_recipient_required: '请先选择接收人',
+        task_recipient_placeholder: '请选择接收人',
+        task_recipient_refresh: '刷新接收人列表',
+        task_recipient_pick_instance_first: '请先选择通道',
+        task_recipient_empty_hint: '该通道下暂无接收人，请先在这个通道向智能体发送一条消息',
+        task_instance: '通道',
+        task_instance_tip: '选择通道后，可指定该通道下已对话过的联系人，将任务结果推送给 TA',
+        task_instance_placeholder: '请选择通道',
+        task_instance_empty: '暂无可用通道',
+        task_instance_no_recipient: '暂无接收人',
+        task_instance_required: '请先选择通道',
         logs_title: '日志', logs_desc: '实时日志输出 (run.log)',
         logs_live: '实时', logs_coming_msg: '日志流即将在此提供。将连接 run.log 实现类似 tail -f 的实时输出。',
         new_chat: '新对话',
@@ -719,6 +740,7 @@ const I18N = {
         channels_save: '儲存設定', channels_saved: '已儲存', channels_save_error: '儲存失敗',
         channels_restarted: '已儲存並重啟',
         channels_connect_btn: '接入', channels_cancel: '取消',
+        channel_rename: '重新命名管道',
         channels_select_placeholder: '選擇要接入的管道...',
         channels_empty: '暫未接入任何管道', channels_empty_desc: '點選右上角「接入管道」按鈕開始設定',
         channels_disconnect_confirm: '確認斷開該管道？設定將保留但管道會停止執行。',
@@ -763,12 +785,13 @@ const I18N = {
         task_interval_seconds: '間隔秒數',
         task_interval_hint: '最小 60 秒，例如 3600 表示每小時執行一次',
         task_once_time: '執行時間',
-        task_action_type: '動作型別',
-        task_action_send_message: '傳送訊息',
+        task_action_type: '任務型別',
+        task_action_send_message: '固定訊息',
         task_action_agent_task: 'AI 任務',
         task_channel_type: '管道型別',
         task_channel_hint: '選擇定時訊息傳送的管道',
         task_message_content: '訊息內容',
+        task_fixed_content: '固定內容',
         task_task_description: '任務描述',
         task_delete_btn: '刪除任務',
         task_delete_confirm_title: '刪除定時任務',
@@ -778,6 +801,25 @@ const I18N = {
         task_run_confirm_msg: '該任務會立即向已設定的通道和接收者傳送內容。是否繼續？',
         task_run_started: '已開始執行',
         task_run_failed: '執行失敗',
+        task_add_title: '新增定時任務',
+        task_add_btn: '新增任務',
+        task_recipient: '接收人',
+        task_recipient_hint: '先選擇通道，再選擇該通道下已聯絡過的聯絡人，任務將主動推送給 TA',
+        task_recipient_select: '選擇接收人',
+        task_recipient_empty: '暫無可選接收人。對方需先透過通道（飛書/企業微信等）聯絡過智慧體。',
+        task_recipient_group: '群聊',
+        task_recipient_user: '使用者',
+        task_recipient_required: '請先選擇接收人',
+        task_recipient_placeholder: '請選擇接收人',
+        task_recipient_refresh: '重新整理接收人列表',
+        task_recipient_pick_instance_first: '請先選擇通道',
+        task_recipient_empty_hint: '該通道下暫無接收人，請先在這個通道向智慧體發送一條訊息',
+        task_instance: '通道',
+        task_instance_tip: '選擇通道後，可指定該通道下已對話過的聯絡人，將任務結果推送給 TA',
+        task_instance_placeholder: '請選擇通道',
+        task_instance_empty: '暫無可用通道',
+        task_instance_no_recipient: '暫無接收人',
+        task_instance_required: '請先選擇通道',
         logs_title: '日誌', logs_desc: '實時日誌輸出 (run.log)',
         logs_live: '實時', logs_coming_msg: '日誌流即將在此提供。將連線 run.log 實現類似 tail -f 的實時輸出。',
         new_chat: '新對話',
@@ -1160,6 +1202,7 @@ const I18N = {
         channels_save: 'Save', channels_saved: 'Saved', channels_save_error: 'Save failed',
         channels_restarted: 'Saved & Restarted',
         channels_connect_btn: 'Connect', channels_cancel: 'Cancel',
+        channel_rename: 'Rename channel',
         channels_select_placeholder: 'Select a channel to connect...',
         channels_empty: 'No channels connected', channels_empty_desc: 'Click the "Connect" button above to get started',
         channels_disconnect_confirm: 'Disconnect this channel? Config will be preserved but the channel will stop.',
@@ -1204,12 +1247,13 @@ const I18N = {
         task_interval_seconds: 'Interval (seconds)',
         task_interval_hint: 'Minimum 60 seconds, e.g. 3600 means once per hour',
         task_once_time: 'Execution Time',
-        task_action_type: 'Action Type',
-        task_action_send_message: 'Send Message',
+        task_action_type: 'Task Type',
+        task_action_send_message: 'Fixed Message',
         task_action_agent_task: 'AI Task',
         task_channel_type: 'Channel Type',
         task_channel_hint: 'Select the channel to send scheduled messages',
         task_message_content: 'Message Content',
+        task_fixed_content: 'Fixed Content',
         task_task_description: 'Task Description',
         task_delete_btn: 'Delete Task',
         task_delete_confirm_title: 'Delete Task',
@@ -1219,6 +1263,25 @@ const I18N = {
         task_run_confirm_msg: 'This task will immediately send to its configured channel and receiver. Continue?',
         task_run_started: 'Run started',
         task_run_failed: 'Run failed',
+        task_add_title: 'New Scheduled Task',
+        task_add_btn: 'New Task',
+        task_recipient: 'Recipient',
+        task_recipient_hint: 'Pick a channel first, then a contact within it; the task will be pushed to them.',
+        task_recipient_select: 'Select recipient',
+        task_recipient_empty: 'No recipients yet. They must contact the agent on a channel (Feishu / WeCom, etc.) first.',
+        task_recipient_group: 'Group',
+        task_recipient_user: 'User',
+        task_recipient_placeholder: 'Select a recipient',
+        task_recipient_refresh: 'Refresh recipient list',
+        task_recipient_pick_instance_first: 'Pick a channel first',
+        task_recipient_empty_hint: 'No recipients on this channel yet — message the agent on this channel first.',
+        task_instance: 'Channel',
+        task_instance_tip: 'After picking a channel, choose a contact you have talked with there; the task result is pushed to them.',
+        task_instance_placeholder: 'Select a channel',
+        task_instance_empty: 'No channels available',
+        task_instance_no_recipient: 'No recipients',
+        task_instance_required: 'Please select a channel',
+        task_recipient_required: 'Please select a recipient',
         logs_title: 'Logs', logs_desc: 'Real-time log output (run.log)',
         logs_live: 'Live', logs_coming_msg: 'Log streaming will be available here. Connects to run.log for real-time output similar to tail -f.',
         new_chat: 'New Chat',
@@ -2357,7 +2420,10 @@ function agentAvatarHTML(agent, size) {
         agent = findAgent(defaultAgentId);
     }
     if (agent && agent.avatar === 'image') {
-        const v = avatarVersions[agent.id] || rosterRevision || agent.id;
+        // Prefer the server's per-file token (avatar mtime): it changes on every
+        // upload, so replacing a picture busts the cache even after a hard reload
+        // when in-memory hints are gone and the roster revision hasn't moved.
+        const v = avatarVersions[agent.id] || agent.avatar_rev || rosterRevision || agent.id;
         return `<img class="${cls}" src="/api/agents/${encodeURIComponent(agent.id)}/avatar?v=${encodeURIComponent(v)}" alt="">`;
     }
     // The default (first) Agent falls back to the product logo when it has no
@@ -11992,11 +12058,15 @@ function renderActiveChannels() {
                 </div>
                 <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
-                        <span class="font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(label)}</span>
+                        <span class="font-semibold text-slate-800 dark:text-slate-100">${escapeHtml(isInstance ? (ch.instance_name || label) : label)}</span>
+                        ${isInstance ? `<button onclick="renameChannelInstance('${ch.name}', '${escapeHtml(iid)}')" title="${escapeHtml(t('channel_rename'))}"
+                            class="text-slate-400 hover:text-primary-500 cursor-pointer transition-colors flex-shrink-0">
+                            <i class="fas fa-pen text-xs"></i>
+                        </button>` : ''}
                         <span class="w-2 h-2 rounded-full ${statusDot}"></span>
                         ${statusText}
                     </div>
-                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">${escapeHtml(iid)}</p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono">${escapeHtml(isInstance ? `${label} · ${iid}` : iid)}</p>
                 </div>
                 <button onclick="disconnectChannel('${ch.name}', '${isInstance ? iid : ''}')"
                     class="px-3 py-1.5 rounded-lg text-xs font-medium
@@ -12242,6 +12312,68 @@ function saveChannelConfig(chName, instanceId) {
     })
     .catch(() => showChannelStatus(iid, 'channels_save_error', true))
     .finally(() => { if (btn) btn.disabled = false; });
+}
+
+// A minimal single-input dialog, used for renaming a channel instance. Mirrors
+// showConfirmDialog's lifecycle so it themes and closes the same way.
+function showRenameDialog({ title, value, okText, cancelText, onConfirm }) {
+    const overlay = document.getElementById('rename-dialog-overlay');
+    if (!overlay) return;
+    const titleEl = overlay.querySelector('h3');
+    const input = document.getElementById('rename-dialog-input');
+    const okBtn = document.getElementById('rename-dialog-ok');
+    const cancelBtn = document.getElementById('rename-dialog-cancel');
+    if (titleEl && title) titleEl.textContent = title;
+    if (okText) okBtn.textContent = okText;
+    if (cancelText) cancelBtn.textContent = cancelText;
+    input.value = value || '';
+
+    function cleanup() {
+        overlay.classList.add('hidden');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        overlay.removeEventListener('click', onOverlayClick);
+        input.removeEventListener('keydown', onKey);
+    }
+    function onOk() { const v = input.value.trim(); cleanup(); if (onConfirm) onConfirm(v); }
+    function onCancel() { cleanup(); }
+    function onOverlayClick(e) { if (e.target === overlay) cleanup(); }
+    function onKey(e) {
+        // Ignore Enter while an IME is composing (e.g. picking a Chinese
+        // candidate), otherwise confirming a candidate would submit the dialog.
+        // keyCode 229 is the legacy signal for "still composing".
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') onOk();
+        else if (e.key === 'Escape') onCancel();
+    }
+
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('click', onOverlayClick);
+    input.addEventListener('keydown', onKey);
+    overlay.classList.remove('hidden');
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+}
+
+function renameChannelInstance(chName, instanceId) {
+    const inst = (channelInstancesView || []).find(i => i.instance_id === instanceId);
+    const current = inst ? (inst.instance_name || '') : '';
+    showRenameDialog({
+        title: t('channel_rename'),
+        value: current,
+        okText: t('channels_save'),
+        cancelText: t('channels_cancel'),
+        onConfirm: (newName) => {
+            fetch('/api/channels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'rename', channel: chName, instance_id: instanceId, name: newName })
+            })
+            .then(r => r.json())
+            .then(data => { if (data.status === 'success') loadChannelsView(); })
+            .catch(() => {});
+        }
+    });
 }
 
 function disconnectChannel(chName, instanceId) {
@@ -14531,70 +14663,254 @@ requestAnimationFrame(() => {
 // Task Edit Modal
 // =====================================================================
 let currentEditingTask = null;
+// Modal mode: 'edit' reuses /api/scheduler/update on an existing task;
+// 'create' collects a brand-new task and posts to /api/scheduler/create.
+let taskModalMode = 'edit';
+// Recipients available for a hand-created cross-channel task, keyed by
+// "instance_id:receiver" so the picker can resolve the full identity on save.
+let taskRecipientMap = {};
 
-function loadTaskChannelOptions(selectedChannelType) {
-    const select = document.getElementById('task-edit-channel-type');
-    select.innerHTML = '';
-    fetch('/api/channels').then(r => r.json()).then(data => {
-        if (data.status !== 'success') return;
-        const allChannels = data.channels || [];
-        // Only include currently active channels, strictly following the channel management page logic
-        let channels = allChannels.filter(c => c.active).map(c => {
-            const label = (typeof c.label === 'object') ? (c.label[currentLang] || c.label.en || c.name) : (c.label || c.name);
-            return { name: c.name, label: label };
-        });
-        const channelNames = channels.map(c => c.name);
-        // Always include the web console channel
-        if (!channelNames.includes('web')) {
-            channels.unshift({ name: 'web', label: currentLang === 'zh' ? 'Web' : 'Web' });
+// Two-step create picker state. `taskInstances` are the deliverable channel
+// instances (step 1); `taskAllRecipients` is the full trusted directory that we
+// filter down to the chosen instance (step 2).
+let taskInstances = [];
+let taskAllRecipients = [];
+let selectedTaskInstanceId = '';
+
+// Middle-truncate a long recipient id so the dropdown row's right-hand id stays
+// on one line (e.g. "o9cq807...MYB0@im.wechat").
+function truncateRecipientId(id, max) {
+    const s = String(id || '');
+    const limit = max || 22;
+    if (s.length <= limit) return s;
+    const head = Math.ceil((limit - 1) / 2);
+    const tail = Math.floor((limit - 1) / 2);
+    return s.slice(0, head) + '…' + s.slice(s.length - tail);
+}
+
+// Mirror the currently selected recipient's receiver into the hidden task field.
+function updateRecipientPreview() {
+    const el = document.getElementById('task-edit-recipient');
+    const receiverInput = document.getElementById('task-edit-receiver');
+    if (!el) return;
+    const key = getDropdownValue(el);
+    const r = taskRecipientMap[key];
+    if (receiverInput) receiverInput.value = r ? r.receiver : '';
+}
+
+// Step 1: load the channel instances the console can deliver through, then wire
+// the instance dropdown. Selecting an instance reveals + drives the recipient list.
+// When editing, `preselect` restores the task's current instance + receiver so
+// the two-step picker opens already pointing at them (still switchable).
+function loadTaskInstances(preselect) {
+    const instEl = document.getElementById('task-edit-instance');
+    if (!instEl) return;
+    const preInstance = (preselect && preselect.instanceId) || '';
+    const preReceiver = (preselect && preselect.receiver) || '';
+    selectedTaskInstanceId = preInstance;
+    taskInstances = [];
+    // Fetch instances and the full recipient directory in parallel; both feed
+    // the two-step picker. The directory is shared across Agents.
+    Promise.all([
+        fetch('/api/scheduler/instances').then(r => r.json()).catch(() => null),
+        fetch('/api/scheduler/recipients').then(r => r.json()).catch(() => null),
+    ]).then(([instData, recData]) => {
+        taskInstances = (instData && instData.status === 'success') ? (instData.instances || []) : [];
+        taskAllRecipients = (recData && recData.status === 'success') ? (recData.recipients || []) : [];
+
+        const options = taskInstances.map(i => ({
+            value: i.instance_id,
+            label: i.name || i.instance_id,
+            // Right side shows the channel type (left is the instance name).
+            hint: i.channel_label || i.channel_type || '',
+        }));
+        if (options.length === 0) {
+            // No instances at all — leave the picker showing a placeholder and
+            // the recipient step hidden. Save will block with a clear message.
+            initDropdown(instEl, [], '', () => {}, { placeholder: t('task_instance_empty') });
+            filterTaskRecipients('');
+            return;
         }
-        // If the currently selected channel is not in the active list (e.g. disabled), append it to preserve selection
-        if (selectedChannelType && !channelNames.includes(selectedChannelType) && selectedChannelType !== 'web') {
-            const ch = allChannels.find(c => c.name === selectedChannelType);
-            const label = ch
-                ? ((typeof ch.label === 'object') ? (ch.label[currentLang] || ch.label.en || ch.name) : (ch.label || ch.name))
-                : selectedChannelType;
-            channels.push({ name: selectedChannelType, label: label });
-        }
-        channels.forEach(c => {
-            const opt = document.createElement('option');
-            opt.value = c.name;
-            opt.textContent = c.label;
-            select.appendChild(opt);
-        });
-        // Set selected value
-        if (selectedChannelType) {
-            select.value = selectedChannelType;
-        }
-    }).catch(() => {
-        // fallback: at least keep the current selection and web
-        select.innerHTML = '';
-        const webOpt = document.createElement('option');
-        webOpt.value = 'web';
-        webOpt.textContent = 'Web';
-        select.appendChild(webOpt);
-        
-        if (selectedChannelType && selectedChannelType !== 'web') {
-            const opt = document.createElement('option');
-            opt.value = selectedChannelType;
-            opt.textContent = selectedChannelType;
-            select.appendChild(opt);
-        }
-        if (selectedChannelType) {
-            select.value = selectedChannelType;
-        }
-        
-        // Show error message
-        console.error('Failed to load channel options');
+        // Only preselect an instance we actually offer (it may have been removed).
+        const initialInstance = options.some(o => o.value === preInstance) ? preInstance : '';
+        selectedTaskInstanceId = initialInstance;
+        initDropdown(instEl, options, initialInstance, (iid) => {
+            selectedTaskInstanceId = iid;
+            filterTaskRecipients(iid);
+            // Ownership follows the delivery instance — repaint the header chip
+            // live so switching the channel never leaves a stale Agent showing.
+            refreshTaskOwnerChipFromInstance(iid);
+        }, { placeholder: t('task_instance_placeholder') });
+        // Restore the recipient too when editing; otherwise force an explicit
+        // choice so the list is never silently scoped to an arbitrary instance.
+        filterTaskRecipients(initialInstance, initialInstance ? preReceiver : '');
+        // Sync the header chip to the initially-selected instance (edit mode).
+        if (initialInstance) refreshTaskOwnerChipFromInstance(initialInstance);
     });
+}
+
+// Step 2: the recipient dropdown appears only after a channel is picked, listing
+// that instance's contacts. The first is selected by default; each row shows the
+// recipient's (truncated) unique id on the right. Empty instances show a hint.
+function filterTaskRecipients(instanceId, preReceiver) {
+    const el = document.getElementById('task-edit-recipient');
+    const wrap = document.getElementById('task-edit-recipient-wrap');
+    if (!el) return;
+    taskRecipientMap = {};
+
+    // The recipient step only exists once a channel is chosen.
+    if (wrap) wrap.classList.toggle('hidden', !instanceId);
+
+    const scoped = instanceId
+        ? taskAllRecipients.filter(r => (r.instance_id || r.channel_type) === instanceId)
+        : [];
+
+    let preKey = '';
+    const options = scoped.map(r => {
+        const iid = r.instance_id || r.channel_type;
+        const key = iid + ':' + r.receiver;
+        taskRecipientMap[key] = r;
+        if (preReceiver && r.receiver === preReceiver) preKey = key;
+        // Fall back to the raw id when a channel gives us no nickname (common on
+        // Feishu). The right-hand hint carries the unique id (truncated).
+        const name = r.name || r.receiver;
+        return { value: key, label: name, hint: truncateRecipientId(r.receiver) };
+    });
+
+    // With no recipients the picker is not selectable — render it disabled with
+    // the "no recipients yet, message the agent first" text right in the control.
+    el.classList.toggle('cfg-dropdown-disabled', options.length === 0);
+
+    // Restore the task's current recipient when editing; else default to the
+    // first so the common case needs no extra click.
+    const selectValue = preKey || (options.length ? options[0].value : '');
+    initDropdown(el, options, selectValue, () => updateRecipientPreview(), {
+        placeholder: options.length ? t('task_recipient_placeholder') : t('task_recipient_empty_hint'),
+    });
+    updateRecipientPreview();
+}
+
+// Re-fetch the trusted directory and rebuild the recipient list for the current
+// instance. Lets the user pull in a contact who just messaged the channel
+// without reopening the modal. A brief spin gives visual feedback.
+function refreshTaskRecipients() {
+    if (!selectedTaskInstanceId) return;
+    const btn = document.getElementById('task-recipient-refresh');
+    const icon = btn ? btn.querySelector('i') : null;
+    if (icon) icon.classList.add('fa-spin');
+    fetch('/api/scheduler/recipients')
+        .then(r => r.json())
+        .then(data => {
+            taskAllRecipients = (data && data.status === 'success') ? (data.recipients || []) : taskAllRecipients;
+            filterTaskRecipients(selectedTaskInstanceId);
+        })
+        .catch(() => {})
+        .finally(() => { if (icon) icon.classList.remove('fa-spin'); });
+}
+
+// Open the modal in "create" mode: blank fields, recipient picker visible,
+// channel selector driven by the picker, no delete button.
+function openTaskCreateModal() {
+    taskModalMode = 'create';
+    currentEditingTask = null;
+
+    const overlay = document.getElementById('task-edit-modal-overlay');
+    const titleEl = document.querySelector('#task-edit-modal-overlay h3');
+    const subtitle = document.getElementById('task-edit-modal-subtitle');
+    const deleteBtn = document.getElementById('task-edit-modal-delete');
+    const ownerEl = document.getElementById('task-edit-owner');
+
+    titleEl.textContent = t('task_add_title');
+    subtitle.textContent = '';
+    deleteBtn.classList.add('hidden');
+    if (ownerEl) { ownerEl.classList.add('hidden'); ownerEl.innerHTML = ''; }
+
+    // Reset fields to sensible defaults.
+    document.getElementById('task-edit-name').value = '';
+    document.getElementById('task-edit-enabled').checked = true;
+    document.getElementById('task-edit-cron-expression').value = '';
+    document.getElementById('task-edit-interval-seconds').value = '';
+    document.getElementById('task-edit-once-time').value = '';
+    document.getElementById('task-edit-content').value = '';
+    document.getElementById('task-edit-receiver').value = '';
+
+    // Schedule/action are custom dropdowns; seed them to defaults.
+    initTaskScheduleDropdown('cron');
+    initTaskActionDropdown('send_message');
+
+    // The "channel" cell holds the instance picker in create mode; the read-only
+    // channel-type is only for edit mode. The recipient picker appears under it
+    // once a channel is chosen (handled by filterTaskRecipients).
+    document.getElementById('task-edit-instance-wrap').classList.remove('hidden');
+    document.getElementById('task-edit-channel-wrap').classList.add('hidden');
+
+    // Two-step picker: choose the channel instance first, then a recipient
+    // within it. The owning Agent is derived server-side from that instance
+    // (an instance binds to one Agent).
+    loadTaskInstances();
+    filterTaskRecipients('');
+
+    updateTaskScheduleFields();
+    updateTaskActionLabel();
+    overlay.classList.remove('hidden');
+}
+
+// The schedule-type and action-type pickers are custom cfg-dropdowns. These
+// helpers (re)build their option lists in the current language and route the
+// selection into the existing show/hide + label logic that used to hang off a
+// native <select> change event.
+function initTaskScheduleDropdown(value) {
+    const el = document.getElementById('task-edit-schedule-type');
+    if (!el) return;
+    const opts = [
+        { value: 'cron', label: t('task_schedule_cron') },
+        { value: 'interval', label: t('task_schedule_interval') },
+        { value: 'once', label: t('task_schedule_once') },
+    ];
+    initDropdown(el, opts, value || 'cron', () => updateTaskScheduleFields());
+}
+
+function initTaskActionDropdown(value) {
+    const el = document.getElementById('task-edit-action-type');
+    if (!el) return;
+    const opts = [
+        { value: 'send_message', label: t('task_action_send_message') },
+        { value: 'agent_task', label: t('task_action_agent_task') },
+    ];
+    initDropdown(el, opts, value || 'send_message', () => updateTaskActionLabel());
+}
+
+// Edit mode only: the channel is frozen, so this just paints a single read-only
+// cfg-dropdown showing the task's channel with a friendly label. No selection is
+// possible (the control carries cfg-dropdown-disabled).
+function loadTaskChannelOptions(selectedChannelType) {
+    const el = document.getElementById('task-edit-channel-type');
+    if (!el) return;
+    const ct = selectedChannelType || 'web';
+    const paint = (label) => initDropdown(el, [{ value: ct, label: label }], ct, () => {});
+    // Web has no channel record; label it directly.
+    if (ct === 'web') { paint('Web'); return; }
+    fetch('/api/channels').then(r => r.json()).then(data => {
+        let label = ct;
+        if (data && data.status === 'success') {
+            const ch = (data.channels || []).find(c => c.name === ct);
+            if (ch) label = (typeof ch.label === 'object') ? (ch.label[currentLang] || ch.label.en || ch.name) : (ch.label || ch.name);
+        }
+        paint(label);
+    }).catch(() => paint(ct));
 }
 
 // The owning Agent shown (read-only) in the task edit modal header. Hidden on a
 // single-Agent install, where every task belongs to the one Agent anyway.
-function renderTaskOwnerChip(task) {
+//
+// Ownership follows the delivery channel instance: an IM task belongs to
+// whichever Agent that instance is currently bound to. So while editing, picking
+// a different instance must repaint this chip live (before save) — otherwise the
+// header would still show the old Agent and read as stale/dirty data.
+function renderTaskOwnerChip(agentId) {
     const el = document.getElementById('task-edit-owner');
     if (!el) return;
-    const agent = task.agent_id ? findAgent(task.agent_id) : null;
+    const agent = agentId ? findAgent(agentId) : null;
     if (!multiAgentMode() || !agent) {
         el.classList.add('hidden');
         el.innerHTML = '';
@@ -14606,7 +14922,17 @@ function renderTaskOwnerChip(task) {
     el.classList.add('flex');
 }
 
+// Repaint the owner chip from a channel instance's current binding. An instance
+// with no explicit binding (or a legacy single-instance channel) falls back to
+// the default Agent, matching how the backend derives the effective owner.
+function refreshTaskOwnerChipFromInstance(instanceId) {
+    const inst = (taskInstances || []).find(i => i.instance_id === instanceId);
+    const agentId = (inst && inst.agent_id) ? inst.agent_id : defaultAgentId;
+    renderTaskOwnerChip(agentId);
+}
+
 function openTaskEditModal(task) {
+    taskModalMode = 'edit';
     currentEditingTask = task;
     const overlay = document.getElementById('task-edit-modal-overlay');
     const titleEl = document.querySelector('#task-edit-modal-overlay h3');
@@ -14627,16 +14953,18 @@ function openTaskEditModal(task) {
     subtitle.textContent = task.id;
     deleteBtn.classList.remove('hidden');
 
-    // Show which Agent owns this task (read-only). Only meaningful with more
-    // than one Agent; a solo install would just repeat the obvious.
-    renderTaskOwnerChip(task);
+    // Show which Agent owns this task. Only meaningful with more than one Agent;
+    // a solo install would just repeat the obvious. For an IM task the chip is
+    // repainted from the picked instance once instances load (and again on every
+    // switch); web/unbound tasks show the stored owner.
+    renderTaskOwnerChip(task.agent_id);
 
     // Populate data
     nameInput.value = task.name || '';
     enabledInput.checked = task.enabled !== false;
 
     const schedule = task.schedule || {};
-    scheduleTypeSelect.value = schedule.type || 'cron';
+    initTaskScheduleDropdown(schedule.type || 'cron');
 
     // Clear all schedule type input values first to avoid stale data
     cronInput.value = '';
@@ -14660,28 +14988,31 @@ function openTaskEditModal(task) {
     }
 
     const action = task.action || {};
-    actionTypeSelect.value = action.type || 'send_message';
+    initTaskActionDropdown(action.type || 'send_message');
     receiverInput.value = action.receiver || '';
     contentInput.value = action.content || action.task_description || '';
 
-    // Load channel options and set selected value
-    loadTaskChannelOptions(action.channel_type || 'web');
-
-    // Disable channel type selector — channel is read-only when editing.
-    // Switching the channel after a task is created is problematic because:
-    //   1. The WeChat (weixin/ilink) bot requires a valid context_token that is tied
-    //      to a specific user-session on that channel. Changing the channel to weixin
-    //      would invalidate the existing token — the new receiver on weixin may not
-    //      have an active context_token, causing the scheduled push to silently fail.
-    //   2. Other channels (DingTalk, Feishu, etc.) also carry channel-specific fields
-    //      (e.g. dingtalk_sender_staff_id) that cannot be trivially re-populated for
-    //      a different channel type without user intervention.
-    //   3. The receiver identity itself is channel-bound — a weixin user-id means
-    //      nothing on a Feishu channel, so changing the channel would orphan the task.
-    // For these reasons, the channel type is intentionally frozen once a task exists.
-    // Users who need a task on a different channel should create a new task through
-    // the chat interface (by asking the bot) rather than editing an existing one.
-    document.getElementById('task-edit-channel-type').disabled = true;
+    // Channel/recipient presentation depends on the task's channel:
+    //   - Web tasks target a chat session, not a switchable contact, so keep the
+    //     read-only channel-type display and no picker.
+    //   - IM tasks reuse the same two-step picker as create (instance + recipient),
+    //     preselected to the task's current values, so the channel instance and the
+    //     recipient can both be switched here just like when creating.
+    const channelType = action.channel_type || 'web';
+    if (channelType === 'web') {
+        document.getElementById('task-edit-recipient-wrap').classList.add('hidden');
+        document.getElementById('task-edit-instance-wrap').classList.add('hidden');
+        document.getElementById('task-edit-channel-wrap').classList.remove('hidden');
+        loadTaskChannelOptions(channelType);
+    } else {
+        document.getElementById('task-edit-channel-wrap').classList.add('hidden');
+        document.getElementById('task-edit-instance-wrap').classList.remove('hidden');
+        // filterTaskRecipients (called inside) toggles the recipient wrap visible.
+        loadTaskInstances({
+            instanceId: action.instance_id || action.channel_type || '',
+            receiver: action.receiver || '',
+        });
+    }
 
     // Update UI
     updateTaskScheduleFields();
@@ -14696,7 +15027,7 @@ function closeTaskEditModal() {
 }
 
 function updateTaskScheduleFields() {
-    const scheduleType = document.getElementById('task-edit-schedule-type').value;
+    const scheduleType = getDropdownValue(document.getElementById('task-edit-schedule-type')) || 'cron';
     const cronWrap = document.getElementById('task-edit-cron-wrap');
     const intervalWrap = document.getElementById('task-edit-interval-wrap');
     const onceWrap = document.getElementById('task-edit-once-wrap');
@@ -14712,13 +15043,15 @@ function updateTaskScheduleFields() {
 }
 
 function updateTaskActionLabel() {
-    const actionType = document.getElementById('task-edit-action-type').value;
+    const actionType = getDropdownValue(document.getElementById('task-edit-action-type')) || 'send_message';
     const label = document.getElementById('task-edit-content-label');
     const content = document.getElementById('task-edit-content');
     
     if (actionType === 'send_message') {
-        label.textContent = t('task_message_content');
-        content.placeholder = t('task_message_content');
+        // A fixed-message task delivers this text verbatim, so both the label and
+        // the placeholder read "Fixed Content".
+        label.textContent = t('task_fixed_content');
+        content.placeholder = t('task_fixed_content');
     } else {
         label.textContent = t('task_task_description');
         content.placeholder = t('task_task_description');
@@ -14747,7 +15080,7 @@ function saveTaskEdit() {
         return;
     }
     
-    const scheduleType = scheduleTypeSelect.value;
+    const scheduleType = getDropdownValue(scheduleTypeSelect) || 'cron';
     const schedule = { type: scheduleType };
     
     if (scheduleType === 'cron') {
@@ -14805,8 +15138,8 @@ function saveTaskEdit() {
         schedule.run_at = time;
     }
     
-    const actionType = actionTypeSelect.value;
-    const channelType = channelTypeSelect.value;
+    const actionType = getDropdownValue(actionTypeSelect) || 'send_message';
+    const channelType = getDropdownValue(channelTypeSelect) || 'web';
     const content = contentInput.value.trim();
 
     if (!content) {
@@ -14816,7 +15149,73 @@ function saveTaskEdit() {
         return;
     }
     
-    // Build action with only necessary fields to avoid stale data
+    const showError = (msg) => {
+        statusEl.textContent = msg;
+        statusEl.style.opacity = '1';
+        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+    };
+    const onDone = () => {
+        closeTaskEditModal();
+        tasksLoaded = false;
+        loadTasksView();
+    };
+
+    // --- Create mode: post a brand-new cross-channel task to a trusted recipient
+    if (taskModalMode === 'create') {
+        if (!selectedTaskInstanceId) {
+            showError(t('task_instance_required'));
+            return;
+        }
+        const recipientEl = document.getElementById('task-edit-recipient');
+        const key = recipientEl ? getDropdownValue(recipientEl) : '';
+        const recipient = taskRecipientMap[key];
+        if (!recipient) {
+            showError(t('task_recipient_required'));
+            return;
+        }
+        // The owning Agent is derived server-side from the recipient's channel
+        // instance (an instance binds to one Agent), so the client only names
+        // the instance + receiver. The instance is what delivery routes back
+        // through; two instances of one channel type are distinct targets.
+        const action = {
+            type: actionType,
+            channel_type: recipient.channel_type,
+            instance_id: recipient.instance_id || recipient.channel_type,
+            receiver: recipient.receiver,
+        };
+        if (actionType === 'send_message') {
+            action.content = content;
+        } else {
+            action.task_description = content;
+        }
+        saveBtn.disabled = true;
+        fetch('/api/scheduler/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: name,
+                enabled: enabledInput.checked,
+                schedule: schedule,
+                action: action,
+            })
+        }).then(r => r.json()).then(res => {
+            saveBtn.disabled = false;
+            if (res.status === 'success') {
+                onDone();
+            } else {
+                showError(res.message || (currentLang === 'zh' ? '创建失败' : 'Create failed'));
+            }
+        }).catch(() => {
+            saveBtn.disabled = false;
+            showError(currentLang === 'zh' ? '网络错误' : 'Network error');
+        });
+        return;
+    }
+
+    // --- Edit mode: update an existing task.
+    const origAction = (currentEditingTask && currentEditingTask.action) || {};
+    const wasWeb = (origAction.channel_type || 'web') === 'web';
+
     const action = {
         type: actionType,
         channel_type: channelType,
@@ -14825,23 +15224,50 @@ function saveTaskEdit() {
         is_group: false,
         notify_session_id: ''
     };
-    
+
     if (actionType === 'send_message') {
         action.content = content;
     } else {
         action.task_description = content;
     }
-    
-    // Preserve the original receiver info (channel is read-only, so it never changes)
-    if (currentEditingTask && currentEditingTask.action) {
-        action.receiver = currentEditingTask.action.receiver || '';
-        action.receiver_name = currentEditingTask.action.receiver_name || '';
-        action.is_group = currentEditingTask.action.is_group || false;
-        action.notify_session_id = currentEditingTask.action.notify_session_id || '';
-        
-        // Preserve channel-specific fields (e.g. DingTalk sender_staff_id)
-        if (channelType === 'dingtalk' && currentEditingTask.action.dingtalk_sender_staff_id) {
-            action.dingtalk_sender_staff_id = currentEditingTask.action.dingtalk_sender_staff_id;
+
+    if (wasWeb) {
+        // Web target isn't switchable: keep the original session receiver/channel.
+        action.channel_type = origAction.channel_type || 'web';
+        action.receiver = origAction.receiver || '';
+        action.receiver_name = origAction.receiver_name || '';
+        action.is_group = origAction.is_group || false;
+        action.notify_session_id = origAction.notify_session_id || '';
+    } else {
+        // IM task: channel instance + recipient can be switched via the picker,
+        // exactly like create. Read them back from the two-step selection.
+        if (!selectedTaskInstanceId) {
+            showError(t('task_instance_required'));
+            saveBtn.disabled = false;
+            return;
+        }
+        const recipientEl = document.getElementById('task-edit-recipient');
+        const key = recipientEl ? getDropdownValue(recipientEl) : '';
+        const recipient = taskRecipientMap[key];
+        if (!recipient) {
+            showError(t('task_recipient_required'));
+            saveBtn.disabled = false;
+            return;
+        }
+        action.channel_type = recipient.channel_type;
+        action.instance_id = recipient.instance_id || recipient.channel_type;
+        action.receiver = recipient.receiver;
+        action.receiver_name = recipient.name || recipient.receiver;
+        action.is_group = recipient.is_group || false;
+        action.notify_session_id = recipient.session_id || recipient.receiver;
+        // Preserve channel-specific fields only when the channel is unchanged
+        // (e.g. DingTalk sender_staff_id is meaningless on a different instance).
+        if (
+            action.channel_type === (origAction.channel_type || '') &&
+            action.receiver === (origAction.receiver || '') &&
+            origAction.dingtalk_sender_staff_id
+        ) {
+            action.dingtalk_sender_staff_id = origAction.dingtalk_sender_staff_id;
         }
     }
     
@@ -14863,19 +15289,13 @@ function saveTaskEdit() {
     }).then(r => r.json()).then(res => {
         saveBtn.disabled = false;
         if (res.status === 'success') {
-            closeTaskEditModal();
-            tasksLoaded = false;
-            loadTasksView();
+            onDone();
         } else {
-            statusEl.textContent = res.message || (currentLang === 'zh' ? '保存失败' : 'Save failed');
-            statusEl.style.opacity = '1';
-            setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+            showError(res.message || (currentLang === 'zh' ? '保存失败' : 'Save failed'));
         }
     }).catch(() => {
         saveBtn.disabled = false;
-        statusEl.textContent = currentLang === 'zh' ? '网络错误' : 'Network error';
-        statusEl.style.opacity = '1';
-        setTimeout(() => { statusEl.style.opacity = '0'; }, 3000);
+        showError(currentLang === 'zh' ? '网络错误' : 'Network error');
     });
 }
 
@@ -14921,8 +15341,8 @@ function deleteTask() {
 }
 
 
-document.getElementById('task-edit-schedule-type').addEventListener('change', updateTaskScheduleFields);
-document.getElementById('task-edit-action-type').addEventListener('change', updateTaskActionLabel);
+// schedule-type / action-type / recipient are now cfg-dropdowns; their change
+// handling is wired through initDropdown's onChange when each modal opens.
 document.getElementById('task-edit-modal-cancel').addEventListener('click', closeTaskEditModal);
 document.getElementById('task-edit-modal-save').addEventListener('click', saveTaskEdit);
 document.getElementById('task-edit-modal-delete').addEventListener('click', deleteTask);

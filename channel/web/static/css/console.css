@@ -1052,6 +1052,19 @@
 }
 .cfg-dropdown-selected:hover { border-color: #94a3b8; }
 .dark .cfg-dropdown-selected:hover { border-color: #64748b; }
+/* Read-only variant: renders like a filled field but never opens (e.g. the
+   task edit modal's frozen channel). Pointer + focus affordances are removed. */
+.cfg-dropdown-disabled { pointer-events: none; }
+.cfg-dropdown-disabled .cfg-dropdown-selected {
+    cursor: not-allowed;
+    background: #f1f5f9;
+    color: #475569;
+}
+.dark .cfg-dropdown-disabled .cfg-dropdown-selected {
+    background: #252525;
+    color: #cbd5e1;
+}
+.cfg-dropdown-disabled .cfg-dropdown-arrow { opacity: 0.4; }
 /* A compact trigger for header rows, so the picker lines up with the pill
    tabs beside it instead of towering over them. */
 .cfg-dropdown-sm .cfg-dropdown-selected {
