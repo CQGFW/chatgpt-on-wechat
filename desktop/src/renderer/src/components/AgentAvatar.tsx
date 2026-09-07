@@ -41,7 +41,7 @@ function initial(name: string): string {
 }
 
 interface AgentAvatarProps {
-  agent?: Pick<AgentProfile, 'id' | 'name' | 'avatar'> | null
+  agent?: Pick<AgentProfile, 'id' | 'name' | 'avatar' | 'avatar_rev'> | null
   size?: number
   className?: string
   // 'circle' (default) for roster/composer faces; 'square' for chat bubbles,
@@ -67,9 +67,11 @@ const AgentAvatar: React.FC<AgentAvatarProps> = ({ agent, size = 32, className =
   const id = agent?.id || ''
 
   if (hasImage && agent) {
+    // Prefer the per-file token (avatar mtime) so a re-upload busts the cache
+    // even when the roster revision is unchanged; fall back to it otherwise.
     return (
       <img
-        src={apiClient.agentAvatarUrl(agent.id, revision || agent.id)}
+        src={apiClient.agentAvatarUrl(agent.id, agent.avatar_rev || revision || agent.id)}
         alt={agent.name || agent.id}
         draggable={false}
         onError={() => setFailed(true)}

@@ -681,7 +681,10 @@ class WeixinChannel(ChatChannel):
         elif reply.type in (ReplyType.IMAGE_URL, ReplyType.IMAGE):
             self._send_image(reply.content, receiver, context_token)
         elif reply.type == ReplyType.FILE:
-            self._send_file(reply.content, receiver, context_token)
+            if getattr(reply, "file_type", "") == "video":
+                self._send_video(reply.content, receiver, context_token)
+            else:
+                self._send_file(reply.content, receiver, context_token)
         elif reply.type in (ReplyType.VIDEO, ReplyType.VIDEO_URL):
             self._send_video(reply.content, receiver, context_token)
         elif reply.type == ReplyType.VOICE:
