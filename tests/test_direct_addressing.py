@@ -179,7 +179,9 @@ class TestSeedTeamMembersFromChannelInstance:
         )
         assert calls.get("members") == ["ops"]
 
-    def test_leaves_an_existing_session_roster_untouched(self, tmp_path, monkeypatch):
+    def test_channel_roster_is_authoritative_and_reconciles(self, tmp_path, monkeypatch):
+        # The channel instance's roster is the source of truth: when the session
+        # roster differs, it is reconciled to match the instance (not left stale).
         from agent.workspace import session_prefs
 
         seeded = []
@@ -188,11 +190,82 @@ class TestSeedTeamMembersFromChannelInstance:
         )
         monkeypatch.setattr(
             session_prefs, "set_prefs",
-            lambda *a, **kw: seeded.append(kw),
+            lambda sid, aid, **kw: seeded.append(kw),
         )
         bridge = _bridge(tmp_path)
         bridge._seed_team_members("chat", "primary", self._ctx(members=["ops"]))
-        assert seeded == []  # a per-session edit must never be clobbered
+        assert seeded == [{"members": ["ops"]}]
+
+    def test_already_in_sync_is_a_noop(self, tmp_path, monkeypatch):
+        from agent.workspace import session_prefs
+
+        seeded = []
+        monkeypatch.setattr(
+            session_prefs, "get_prefs", lambda sid, aid: {"members": ["ops"]}
+        )
+        monkeypatch.setattr(
+            session_prefs, "set_prefs", lambda *a, **kw: seeded.append(kw)
+        )
+        bridge = _bridge(tmp_path)
+        bridge._seed_team_members("chat", "primary", self._ctx(members=["ops"]))
+        assert seeded == []  # no redundant write when nothing changed
+
+    def test_single_agent_instance_clears_stale_session_roster(self, tmp_path, monkeypatch):
+        # Switching an instance back to a single Agent (empty members) must drop
+        # the session's stale team roster, or the team prompt keeps injecting.
+        from agent.workspace import session_prefs
+
+        calls = []
+        monkeypatch.setattr(
+            session_prefs, "get_prefs", lambda sid, aid: {"members": ["ops"]}
+        )
+        monkeypatch.setattr(
+            session_prefs, "set_prefs",
+            lambda sid, aid, **kw: calls.append(kw),
+        )
+        bridge = _bridge(tmp_path)
+        # A channel message that now carries an empty roster (members=[]).
+        bridge._seed_team_members("chat", "primary", self._ctx(members=[]))
+        assert calls == [{"members": None}]  # roster cleared
+
+    def test_empty_members_with_no_existing_roster_is_a_noop(self, tmp_path, monkeypatch):
+        from agent.workspace import session_prefs
+
+        calls = []
+        monkeypatch.setattr(session_prefs, "get_prefs", lambda sid, aid: {})
+        monkeypatch.setattr(
+            session_prefs, "set_prefs", lambda *a, **kw: calls.append(kw)
+        )
+        bridge = _bridge(tmp_path)
+        bridge._seed_team_members("chat", "primary", self._ctx(members=[]))
+        assert calls == []  # nothing to clear, nothing to write
+
+    def test_delegation_members_seed_once_and_never_clobber(self, tmp_path, monkeypatch):
+        # A delegated turn (private session) seeds once from delegation_members
+        # and must not overwrite an existing roster.
+        from agent.workspace import session_prefs
+
+        seeded = []
+        monkeypatch.setattr(session_prefs, "get_prefs", lambda sid, aid: {})
+        monkeypatch.setattr(
+            session_prefs, "set_prefs",
+            lambda sid, aid, **kw: seeded.append(kw),
+        )
+        bridge = _bridge(tmp_path)
+        bridge._seed_team_members(
+            "chat", "primary", self._ctx(delegation_members=["ops"])
+        )
+        assert seeded == [{"members": ["ops"]}]
+
+        # Now with an existing roster, delegation must not clobber it.
+        seeded.clear()
+        monkeypatch.setattr(
+            session_prefs, "get_prefs", lambda sid, aid: {"members": ["research"]}
+        )
+        bridge._seed_team_members(
+            "chat", "primary", self._ctx(delegation_members=["ops"])
+        )
+        assert seeded == []
 
     def test_disabled_or_unknown_teammates_are_dropped(self, tmp_path, monkeypatch):
         from agent.workspace import session_prefs

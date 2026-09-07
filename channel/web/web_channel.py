@@ -6869,7 +6869,7 @@ class AgentsHandler:
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
             return json.dumps(
-                {"status": "success", **_agent_admin_service().snapshot()},
+                {"status": "success", **_annotate_avatar_revs(_agent_admin_service().snapshot())},
                 ensure_ascii=False,
             )
         except Exception as e:
@@ -7034,6 +7034,34 @@ def _avatar_path(agent_id: str) -> Optional[str]:
         if candidate.is_file():
             return str(candidate)
     return None
+
+
+def _avatar_rev(agent_id: str) -> Optional[str]:
+    """A cache-busting token derived from the avatar file's mtime.
+
+    The roster revision only hashes team.json, but replacing an avatar rewrites
+    an image file without touching any field there, so the revision stays put
+    and the browser keeps serving the cached picture. Keying the URL on the
+    file's mtime instead means every upload changes the token and the <img>
+    refetches, even after a hard reload where in-memory hints are gone.
+    """
+    path = _avatar_path(agent_id)
+    if not path:
+        return None
+    try:
+        return str(int(os.path.getmtime(path)))
+    except OSError:
+        return None
+
+
+def _annotate_avatar_revs(snapshot: dict) -> dict:
+    """Attach ``avatar_rev`` to every Agent that carries an uploaded image."""
+    for agent in snapshot.get("agents") or []:
+        if agent.get("avatar") == AVATAR_IMAGE_TOKEN:
+            rev = _avatar_rev(agent.get("id", ""))
+            if rev:
+                agent["avatar_rev"] = rev
+    return snapshot
 
 
 class AgentAvatarHandler:

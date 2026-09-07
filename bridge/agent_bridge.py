@@ -624,47 +624,71 @@ class AgentBridge:
         return get_conversation_store(profile.workspace)
 
     def _seed_team_members(self, session_id: str, host_agent_id: str, context: Context = None) -> None:
-        """Project a team bot's fixed roster onto the session, once.
+        """Project a team bot's roster onto the session.
 
         A channel instance configured with ``members`` is a fixed team: its
         owner (``host_agent_id``) plus teammates it may delegate to. The rest of
         the stack learns a conversation is a team from
-        ``session_prefs.members``, so the instance roster is copied there the
-        first time a message arrives on a session that has none yet.
+        ``session_prefs.members``, so the instance roster is mirrored there.
 
-        Only seeds when the session has no roster of its own, so a per-session
-        edit (Web) is never clobbered; and only for enabled teammates other than
-        the owner, matching how a Web team is stored.
+        Two sources, two policies:
 
-        A delegated turn runs in its own private session that carries no roster;
-        the original team travels with it as ``delegation_members`` instead, so
-        seeding from that lets a teammate delegate onward to the same team.
+        - **Channel instance** (message carries an ``instance_id``): the instance
+          roster is *authoritative* and is reconciled onto the session every
+          time — including shrinking it, or clearing it when the instance was
+          switched back to a single Agent. Without this, a session seeded once
+          when the instance was a team keeps injecting the team prompt forever
+          even after the roster is emptied in the console.
+
+        - **Delegation** (a delegated turn runs in its own private session and
+          carries ``delegation_members``): seed-once, never overwrite, so a
+          teammate can delegate onward to the same team.
+
+        Only enabled teammates other than the owner are kept, matching how a Web
+        team is stored.
         """
         if not session_id or not context:
             return
-        members = (
-            context.get("members")
-            or context.kwargs.get("members")
-            or context.get("delegation_members")
-            or context.kwargs.get("delegation_members")
-        )
-        if not members:
-            return
+        # The channel path carries the roster under ``members`` and is
+        # authoritative (it mirrors the instance's live team.json roster). A
+        # delegated turn instead carries ``delegation_members`` and is seed-once.
+        channel_members = context.get("members")
+        if channel_members is None:
+            channel_members = context.kwargs.get("members")
+        from_channel = channel_members is not None
+        delegation_members = context.get("delegation_members") or context.kwargs.get("delegation_members")
+
         try:
             from agent.workspace import session_prefs
 
-            if session_prefs.get_prefs(session_id, host_agent_id).get("members"):
-                return  # session already has its own roster; leave it be
-            cleaned = []
-            for mid in members:
-                mid = str(mid or "").strip()
-                if not mid or mid == host_agent_id or mid in cleaned:
-                    continue
-                try:
-                    self.agent_registry.get(mid, require_enabled=True)
-                except Exception:
-                    continue  # skip unknown/disabled teammates
-                cleaned.append(mid)
+            existing = session_prefs.get_prefs(session_id, host_agent_id).get("members")
+
+            if from_channel:
+                # Authoritative reconcile against the instance's current roster,
+                # even when it is now empty (single-Agent instance).
+                cleaned = self._clean_team_members(channel_members or [], host_agent_id)
+                if list(existing or []) == cleaned:
+                    return  # already in sync — nothing to write
+                if cleaned:
+                    session_prefs.set_prefs(session_id, host_agent_id, members=cleaned)
+                    logger.info(
+                        f"[AgentBridge] Reconciled team roster {cleaned} onto session "
+                        f"'{session_id}' owned by {host_agent_id}"
+                    )
+                elif existing:
+                    # Instance is no longer a team: drop the stale session roster
+                    # so the team prompt stops being injected.
+                    session_prefs.set_prefs(session_id, host_agent_id, members=None)
+                    logger.info(
+                        f"[AgentBridge] Cleared stale team roster from session "
+                        f"'{session_id}' owned by {host_agent_id} (instance is single-Agent)"
+                    )
+                return
+
+            # Delegation path: seed once, never clobber an existing roster.
+            if existing:
+                return
+            cleaned = self._clean_team_members(delegation_members or [], host_agent_id)
             if cleaned:
                 session_prefs.set_prefs(session_id, host_agent_id, members=cleaned)
                 logger.info(
@@ -673,6 +697,21 @@ class AgentBridge:
                 )
         except Exception as e:
             logger.debug(f"[AgentBridge] _seed_team_members failed: {e}")
+
+    def _clean_team_members(self, members, host_agent_id: str) -> list:
+        """Normalize a roster: drop the owner, blanks, dupes and unknown/disabled
+        Agents, preserving order. Returns the teammates to store on a session."""
+        cleaned = []
+        for mid in members or []:
+            mid = str(mid or "").strip()
+            if not mid or mid == host_agent_id or mid in cleaned:
+                continue
+            try:
+                self.agent_registry.get(mid, require_enabled=True)
+            except Exception:
+                continue  # skip unknown/disabled teammates
+            cleaned.append(mid)
+        return cleaned
 
     def _resolve_speaker(self, host_agent_id: str, context: Context = None) -> str:
         """Pick who answers this turn: the conversation's owner, or a teammate
@@ -1443,6 +1482,7 @@ class AgentBridge:
             file_url = _to_channel_url(file_path)
             logger.info(f"[AgentBridge] Sending {file_type}: {file_url}")
             reply = Reply(ReplyType.FILE, file_url)
+            reply.file_type = file_type
             reply.file_name = file_info.get("file_name", os.path.basename(file_path))
             # Attach text message if present
             if text_response:
@@ -1453,6 +1493,7 @@ class AgentBridge:
         file_url = _to_channel_url(file_path)
         logger.info(f"[AgentBridge] Sending generic file: {file_url}")
         reply = Reply(ReplyType.FILE, file_url)
+        reply.file_type = file_type
         reply.file_name = file_info.get("file_name", os.path.basename(file_path))
         if text_response:
             reply.text_content = text_response
