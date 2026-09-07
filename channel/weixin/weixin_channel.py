@@ -663,8 +663,13 @@ class WeixinChannel(ChatChannel):
         context_token = self._get_context_token(receiver, msg)
 
         if not context_token:
-            logger.error(f"[Weixin] No context_token for receiver={receiver}, cannot send")
-            return
+            # Raise rather than return: a scheduled push routes through this same
+            # send(), and the scheduler treats a silent return as "delivered" and
+            # deletes a one-time task. Without a context_token the message cannot
+            # go out, so surface it as a failure the caller can defer/retry on.
+            raise RuntimeError(
+                f"[Weixin] No context_token for receiver={receiver}, cannot send"
+            )
 
         # A media reply can carry an accompanying message (the agent's summary of
         # the file it just sent). ilink has no caption field, so it goes out as a

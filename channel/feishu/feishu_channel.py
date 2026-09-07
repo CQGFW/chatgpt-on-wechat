@@ -987,12 +987,18 @@ class FeiShuChanel(ChatChannel):
             if fallback_body.get("code") == 0:
                 logger.info("[FeiShu] text fallback sent successfully")
             else:
-                logger.error(
+                # Raise so a scheduled push isn't silently marked delivered (and a
+                # one-time task deleted) when the message never went out.
+                raise RuntimeError(
                     "[FeiShu] text fallback failed, "
                     f"code={fallback_body.get('code')}, msg={fallback_body.get('msg')}"
                 )
         else:
-            logger.error(f"[FeiShu] send message failed, code={res.get('code')}, msg={res.get('msg')}")
+            # Same reason: surface the failure so the scheduler can defer/retry
+            # instead of treating a dropped message as success.
+            raise RuntimeError(
+                f"[FeiShu] send message failed, code={res.get('code')}, msg={res.get('msg')}"
+            )
 
     def _make_feishu_stream_callback(self, context, access_token):
         """Route to detailed or plain streaming callback based on config.
