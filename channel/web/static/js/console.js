@@ -155,14 +155,11 @@ const I18N = {
         models_search_bocha_desc: '前往博查开放平台创建 API Key',
         models_search_anysearch_title: '配置 AnySearch API Key',
         models_search_anysearch_desc: '前往 anysearch.com 控制台创建 API Key。',
-<<<<<<< Updated upstream
         models_search_serply_title: '配置 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台创建 API Key。',
-=======
         models_search_anysearch_anon_hint: '留空可启用匿名模式（无需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
->>>>>>> Stashed changes
         models_search_edit_hint: '点击修改配置',
         models_unavailable: '不可用',
         models_set_via_env: '通过环境变量启用',
@@ -607,14 +604,11 @@ const I18N = {
         models_search_bocha_desc: '前往博查開放平臺建立 API Key',
         models_search_anysearch_title: '設定 AnySearch API Key',
         models_search_anysearch_desc: '前往 anysearch.com 控制台建立 API Key',
-<<<<<<< Updated upstream
         models_search_serply_title: '設定 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台建立 API Key',
-=======
         models_search_anysearch_anon_hint: '留空可啟用匿名模式（無需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
->>>>>>> Stashed changes
         models_search_edit_hint: '點選修改設定',
         models_unavailable: '不可用',
         models_set_via_env: '透過環境變數啟用',
@@ -1054,14 +1048,11 @@ const I18N = {
         models_search_bocha_desc: 'Create a key at the Bocha open platform.',
         models_search_anysearch_title: 'Configure AnySearch API Key',
         models_search_anysearch_desc: 'Create a key at the AnySearch console (anysearch.com).',
-<<<<<<< Updated upstream
         models_search_serply_title: 'Configure Serply API Key',
         models_search_serply_desc: 'Create a key at the Serply console (serply.io).',
-=======
         models_search_anysearch_anon_hint: 'Leave empty to enable anonymous mode (no API key required)',
         models_search_anonymous_badge: 'anonymous',
         models_search_anonymous_disable: 'Disable anonymous',
->>>>>>> Stashed changes
         models_search_edit_hint: 'Click to edit',
         models_unavailable: 'unavailable',
         models_set_via_env: 'enable via environment variable',
