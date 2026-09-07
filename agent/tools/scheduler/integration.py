@@ -285,31 +285,7 @@ def init_scheduler(agent_bridge, workspace_root: str = None, agent_id: str = Non
                 agent_id = _resolve_task_agent_id(agent_bridge, task)
                 try:
                     with identity_scope(agent_id=agent_id):
-                        action = task.get("action", {})
-                        action_type = action.get("type")
-                        channel_type = _primary_channel_type(action.get("channel_type"))
-                        receiver = action.get("receiver", "")
-                        instance_id = action.get("instance_id") or ""
-
-                        if not _is_channel_ready(channel_type, receiver, agent_id, instance_id):
-                            logger.warning(
-                                f"[Scheduler] Task {task.get('id')}: channel "
-                                f"'{channel_type}' not ready for receiver={receiver} "
-                                f"(no inbound msg cached since restart?); deferring"
-                            )
-                            return False
-
-                        if action_type == "agent_task":
-                            return _execute_agent_task(task, agent_bridge, agent_id)
-                        elif action_type == "send_message":
-                            return _execute_send_message(task, agent_bridge, agent_id)
-                        elif action_type == "tool_call":
-                            return _execute_tool_call(task, agent_bridge, agent_id)
-                        elif action_type == "skill_call":
-                            return _execute_skill_call(task, agent_bridge, agent_id)
-                        else:
-                            logger.warning(f"[Scheduler] Unknown action type: {action_type}")
-                            return True
+                        return _run_scheduled_task(task, agent_bridge, agent_id)
                 except Exception as e:
                     logger.error(f"[Scheduler] Error executing task {task.get('id')}: {e}")
                     return False
@@ -648,7 +624,126 @@ def _remember_delivered_output(
         )
 
 
-def _execute_agent_task(task: dict, agent_bridge, agent_id: str = None) -> bool:
+# Longest delivered-content snippet stored on a scheduler run for at-a-glance
+# history ("what did this task actually send?"). Kept short so the runs sidecar
+# stays a light index, not a second copy of the message body.
+_OUTPUT_PREVIEW_LIMIT = 200
+
+
+def _record_scheduler_run(task: dict, agent_id: str, trigger: str = "scheduled"):
+    """Open a ``runs`` row for one scheduler execution, or ``None`` if runs
+    tracking is unavailable.
+
+    Reuses the same global ``runs`` table that native turns, delegations and
+    subagents write to (now agent-scoped in the one global ``index.db``), so a
+    scheduled job is just another addressable unit of work: ``task_source`` is
+    ``"scheduler"`` and ``task_id`` is the task's id. Returns ``(store, run_id)``
+    to be closed by :func:`finish_run`, or ``None`` when the store/runs table
+    isn't ready — recording a run must never block a delivery.
+
+    ``trigger`` records how the tick fired — ``"scheduled"`` for the timer,
+    ``"manual"`` for a user-initiated "run now" — so history can tell an
+    automatic run apart from one a person kicked off.
+    """
+    try:
+        import uuid
+
+        from agent.memory import get_conversation_store
+
+        action = task.get("action", {})
+        session_id = action.get("notify_session_id") or action.get("receiver") or ""
+        run_id = uuid.uuid4().hex
+        store = get_conversation_store()  # routing-aware: scoped to agent_id
+        created = store.create_run(
+            run_id,
+            agent_id=agent_id or "",
+            session_id=session_id,
+            task_id=str(task.get("id") or ""),
+            task_source="scheduler",
+            extras={
+                "action_type": action.get("type", ""),
+                "channel_type": _primary_channel_type(action.get("channel_type")),
+                "task_name": task.get("name", ""),
+                "trigger": trigger,
+            },
+        )
+        if not created:
+            return None
+        return store, run_id
+    except Exception as e:
+        logger.debug(f"[Scheduler] run recording unavailable: {e}")
+        return None
+
+
+def _run_scheduled_task(
+    task: dict, agent_bridge, agent_id: str, trigger: str = "scheduled"
+) -> bool:
+    """Dispatch one task, recording an execution ``run`` around the attempt.
+
+    Readiness is checked first: a not-ready channel is a *deferral*, not an
+    execution, so no run row is opened for it (that would log a failed run every
+    tick until the channel wakes). Once we commit to running, a run is opened,
+    the action dispatched, and the run closed ``done``/``error`` from the
+    outcome. Run recording is best-effort and never changes the delivery result.
+
+    A mutable ``sink`` collects the delivered content each ``_execute_*`` sends,
+    so the closing ``finish_run`` can store a short ``output_preview`` on the
+    run — a peek at "what did this send?" without opening the session.
+    """
+    action = task.get("action", {})
+    action_type = action.get("type")
+    channel_type = _primary_channel_type(action.get("channel_type"))
+    receiver = action.get("receiver", "")
+    instance_id = action.get("instance_id") or ""
+
+    if not _is_channel_ready(channel_type, receiver, agent_id, instance_id):
+        logger.warning(
+            f"[Scheduler] Task {task.get('id')}: channel "
+            f"'{channel_type}' not ready for receiver={receiver} "
+            f"(no inbound msg cached since restart?); deferring"
+        )
+        return False
+
+    run = _record_scheduler_run(task, agent_id, trigger=trigger)
+    sink: Dict[str, str] = {}
+    status = "done"
+    error = ""
+    try:
+        if action_type == "agent_task":
+            ok = _execute_agent_task(task, agent_bridge, agent_id, output_sink=sink)
+        elif action_type == "send_message":
+            ok = _execute_send_message(task, agent_bridge, agent_id, output_sink=sink)
+        elif action_type == "tool_call":
+            ok = _execute_tool_call(task, agent_bridge, agent_id, output_sink=sink)
+        elif action_type == "skill_call":
+            ok = _execute_skill_call(task, agent_bridge, agent_id, output_sink=sink)
+        else:
+            logger.warning(f"[Scheduler] Unknown action type: {action_type}")
+            ok = True
+        if not ok:
+            status = "error"
+            error = "deferred or delivery failed"
+        return ok
+    except Exception as e:
+        status = "error"
+        error = str(e)
+        raise
+    finally:
+        if run is not None:
+            store, run_id = run
+            extras = None
+            preview = (sink.get("preview") or "").strip()
+            if preview:
+                extras = {"output_preview": preview[:_OUTPUT_PREVIEW_LIMIT]}
+            try:
+                store.finish_run(run_id, status=status, error=error, extras=extras)
+            except Exception as e:
+                logger.debug(f"[Scheduler] finish_run failed for {run_id}: {e}")
+
+
+def _execute_agent_task(
+    task: dict, agent_bridge, agent_id: str = None, output_sink: dict = None
+) -> bool:
     """
     Execute an agent_task action - let Agent handle the task.
     Returns True on successful delivery, False to retry next tick.
@@ -754,6 +849,8 @@ def _execute_agent_task(task: dict, agent_bridge, agent_id: str = None) -> bool:
                 logger.error(f"[Scheduler] Failed to send result: {e}")
                 return False
 
+            if output_sink is not None:
+                output_sink["preview"] = str(reply.content)
             _remember_delivered_output(
                 agent_bridge, task, channel_type, reply.content, agent_id
             )
@@ -773,7 +870,9 @@ def _execute_agent_task(task: dict, agent_bridge, agent_id: str = None) -> bool:
         return False
 
 
-def _execute_send_message(task: dict, agent_bridge, agent_id: str = None) -> bool:
+def _execute_send_message(
+    task: dict, agent_bridge, agent_id: str = None, output_sink: dict = None
+) -> bool:
     """Execute a send_message action. Returns True/False for delivery."""
     try:
         action = task.get("action", {})
@@ -842,6 +941,8 @@ def _execute_send_message(task: dict, agent_bridge, agent_id: str = None) -> boo
             logger.error(f"[Scheduler] Failed to send message: {e}")
             return False
 
+        if output_sink is not None:
+            output_sink["preview"] = str(content)
         _remember_delivered_output(
             agent_bridge, task, channel_type, content, agent_id
         )
@@ -855,7 +956,9 @@ def _execute_send_message(task: dict, agent_bridge, agent_id: str = None) -> boo
         return False
 
 
-def _execute_tool_call(task: dict, agent_bridge, agent_id: str = None) -> bool:
+def _execute_tool_call(
+    task: dict, agent_bridge, agent_id: str = None, output_sink: dict = None
+) -> bool:
     """Execute a tool_call action. Returns True/False for delivery."""
     try:
         action = task.get("action", {})
@@ -918,6 +1021,8 @@ def _execute_tool_call(task: dict, agent_bridge, agent_id: str = None) -> bool:
             logger.error(f"[Scheduler] Failed to send tool result: {e}")
             return False
 
+        if output_sink is not None:
+            output_sink["preview"] = str(content)
         _remember_delivered_output(
             agent_bridge, task, channel_type, content, agent_id
         )
@@ -929,7 +1034,9 @@ def _execute_tool_call(task: dict, agent_bridge, agent_id: str = None) -> bool:
         return False
 
 
-def _execute_skill_call(task: dict, agent_bridge, agent_id: str = None) -> bool:
+def _execute_skill_call(
+    task: dict, agent_bridge, agent_id: str = None, output_sink: dict = None
+) -> bool:
     """Execute a skill_call action by asking Agent to run the skill.
     Returns True/False for delivery."""
     try:
@@ -1004,6 +1111,8 @@ def _execute_skill_call(task: dict, agent_bridge, agent_id: str = None) -> bool:
             logger.error(f"[Scheduler] Failed to send skill result: {e}")
             return False
 
+        if output_sink is not None:
+            output_sink["preview"] = str(content)
         _remember_delivered_output(
             agent_bridge, task, channel_type, content, agent_id
         )
