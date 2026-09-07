@@ -87,10 +87,14 @@ def _task(task_id, name):
     }
 
 
-def test_conversations_with_same_session_id_use_different_databases(
+def test_conversations_with_same_session_id_are_isolated_by_agent_id(
     isolated_registry,
 ):
-    primary = isolated_registry.get("primary")
+    """Two Agents sharing a session_id no longer need separate files: they live
+    in the one global file (the default Agent's index.db) and are told apart by
+    the agent_id column. The default Agent scopes to "" so its historical rows
+    stay valid; every other Agent scopes to its own id."""
+    primary = isolated_registry.get("primary")  # the default Agent
     research = isolated_registry.get("research")
     primary_store = get_conversation_store(primary.workspace)
     research_store = get_conversation_store(research.workspace)
@@ -98,11 +102,18 @@ def test_conversations_with_same_session_id_use_different_databases(
     primary_store.append_messages("same-session", [_message("primary")])
     research_store.append_messages("same-session", [_message("research")])
 
+    # Distinct handles, one per Agent...
     assert primary_store is not research_store
+    # ...scoped by agent_id: default -> "", others -> their id.
+    assert primary_store._agent_id == ""
+    assert research_store._agent_id == "research"
+    # The same session_id does not collide across Agents.
     assert primary_store.load_messages("same-session")[0]["content"][0]["text"] == "primary"
     assert research_store.load_messages("same-session")[0]["content"][0]["text"] == "research"
-    assert Path(primary_store._db_path) == Path(primary.workspace) / "memory/long-term/index.db"
-    assert Path(research_store._db_path) == Path(research.workspace) / "memory/long-term/index.db"
+    # Both back onto the one global file (the default Agent's index.db).
+    global_db = Path(primary.workspace) / "memory/long-term/index.db"
+    assert Path(primary_store._db_path) == global_db
+    assert Path(research_store._db_path) == global_db
 
 
 def test_memory_config_keeps_each_agent_index_under_its_workspace(

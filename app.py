@@ -604,6 +604,23 @@ def _migrate_team_roster():
         logger.warning(f"[App] Could not move the roster into its own file: {e}")
 
 
+def _migrate_conversations():
+    """Fold every Agent's conversations into the one global file at startup.
+
+    Level 1 (add agent_id column / composite key) runs synchronously so the
+    default Agent's file is ready before channels accept traffic; the actual
+    copy of other Agents' rows is kicked off on a background thread and resumes
+    next start if interrupted. Never fatal: a failure leaves each Agent on its
+    own file and is logged.
+    """
+    try:
+        from agent.memory import migrate_conversations_to_global
+
+        migrate_conversations_to_global(kickoff_async=True)
+    except Exception as e:
+        logger.warning(f"[App] Conversation global migration skipped: {e}")
+
+
 def _warn_if_legacy_workspace_data_exists():
     """
     Warn if the hardcoded ~/cow default holds data that agent_workspace
@@ -735,6 +752,7 @@ def run():
         # load config
         load_config()
         _migrate_team_roster()
+        _migrate_conversations()
         _warn_if_legacy_workspace_data_exists()
         # ctrl + c
         sigterm_handler_wrap(signal.SIGINT)
