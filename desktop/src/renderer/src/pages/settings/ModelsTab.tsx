@@ -803,7 +803,9 @@ const EmbeddingCard: React.FC<{
 // instance URL. AnySearch additionally supports an anonymous tier, so it
 // counts as "configured" even without a key. Mirrors the web console flow.
 const isDedicatedKeyProvider = (p: SearchProviderMeta): boolean =>
-  p.needs_dedicated_key || p.needs_url || ['bocha', 'anysearch', 'serply', 'tavily', 'searxng'].includes(p.id)
+  p.needs_dedicated_key ||
+  p.needs_url ||
+  ['bocha', 'anysearch', 'serply', 'tavily', 'searxng', 'keenable'].includes(p.id)
 
 const SearchCard: React.FC<{
   state: SearchCapabilityState
@@ -964,7 +966,8 @@ const SearchKeyModal: React.FC<{
   onSave: (value: string, anonymous: boolean) => void
 }> = ({ provider, busy, onClose, onSave }) => {
   const open = !!provider
-  const isAnysearch = provider?.id === 'anysearch'
+  // anysearch and keenable share the "save empty = enable anonymous tier" contract.
+  const isAnonymousProvider = provider?.id === 'anysearch' || provider?.id === 'keenable'
   const isSearxng = provider?.id === 'searxng' || !!provider?.needs_url
   // SearXNG prefills its plain instance URL; others prefill the masked key.
   const initial = isSearxng ? provider?.url_masked || '' : provider?.api_key_masked || ''
@@ -997,20 +1000,20 @@ const SearchKeyModal: React.FC<{
     }
     // Kept the masked placeholder untouched -> nothing to persist.
     if (!dirty || MASK_RE.test(value)) {
-      // AnySearch: an untouched-but-empty field still means "anonymous".
-      if (isAnysearch && !initial) onSave('', true)
+      // anysearch/keenable: an untouched-but-empty field still means "anonymous".
+      if (isAnonymousProvider && !initial) onSave('', true)
       else onClose()
       return
     }
     const trimmed = value.trim()
-    // AnySearch: empty key = enable anonymous mode.
-    onSave(trimmed, isAnysearch && !trimmed)
+    // anysearch/keenable: empty key = enable anonymous mode.
+    onSave(trimmed, isAnonymousProvider && !trimmed)
   }
 
   const fieldLabel = isSearxng ? t('models_search_instance_url') : 'API Key'
   const fieldHint = isSearxng
     ? undefined
-    : isAnysearch
+    : isAnonymousProvider
       ? t('models_search_anysearch_anon_hint')
       : undefined
   const placeholder = isSearxng ? 'https://searxng.example.com' : 'sk-...'
