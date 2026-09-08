@@ -1705,8 +1705,10 @@ class AgentBridge:
                 Maximum scheduler-injected user/assistant pairs retained per
                 session. Older injections are pruned automatically.
 
-        Content is truncated to 2000 chars to prevent a single high-volume task
-        from bloating one entry.
+        Content is truncated to 4000 chars to prevent a single high-volume task
+        from bloating one entry, while staying long enough that the history
+        detail view (which recovers this copy) shows the full message for the
+        vast majority of tasks. An ellipsis marks the rare over-limit case.
         """
         from config import conf
         if not conf().get("scheduler_inject_to_session", True):
@@ -1714,9 +1716,9 @@ class AgentBridge:
         if not session_id or not content:
             return
 
-        max_len = 2000
+        max_len = 4000
         if len(content) > max_len:
-            content = content[:max_len] + "..."
+            content = content[:max_len].rstrip() + "…"
 
         user_text = self._SCHEDULED_MARKER
         if task_description:

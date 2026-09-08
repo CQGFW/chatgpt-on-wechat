@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   XCircle,
   History,
+  Trash2,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { t } from '../i18n'
@@ -26,6 +27,7 @@ import type {
 import { Modal, Btn, Toggle, TextInput, Dropdown, Field } from './settings/primitives'
 import type { DropdownOption } from './settings/primitives'
 import AgentAvatar from '../components/AgentAvatar'
+import Markdown from '../components/Markdown'
 import { useAgentStore, selectMultiAgent, findAgent } from '../store/agentStore'
 import { askConfirm } from '../store/confirmStore'
 
@@ -385,21 +387,58 @@ const RecordsView: React.FC<{
   const navigate = useNavigate()
   const [runs, setRuns] = useState<SchedulerRun[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   const [detailRun, setDetailRun] = useState<SchedulerRun | null>(null)
   const multiAgent = useAgentStore(selectMultiAgent)
+
+  const PAGE_SIZE = 30
 
   const loadRuns = async () => {
     try {
       setLoading(true)
       onLoadingChange(true)
-      const data = await apiClient.getSchedulerRuns()
+      const data = await apiClient.getSchedulerRuns('', PAGE_SIZE, 0)
       setRuns(data || [])
+      setHasMore((data || []).length >= PAGE_SIZE)
     } catch (err) {
       console.error('Failed to load run history:', err)
       setRuns([])
+      setHasMore(false)
     } finally {
       setLoading(false)
       onLoadingChange(false)
+    }
+  }
+
+  // Append the next page. A full page implies there may be more.
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return
+    try {
+      setLoadingMore(true)
+      const data = await apiClient.getSchedulerRuns('', PAGE_SIZE, runs.length)
+      setRuns((prev) => [...prev, ...(data || [])])
+      setHasMore((data || []).length >= PAGE_SIZE)
+    } catch (err) {
+      console.error('Failed to load more run history:', err)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  // Confirm, then delete one record and drop it from the list.
+  const deleteRun = async (run: SchedulerRun) => {
+    const ok = await askConfirm({
+      titleKey: 'records_delete_confirm_title',
+      msgKey: 'records_delete_confirm_msg',
+      okKey: 'records_delete',
+    })
+    if (!ok) return
+    try {
+      await apiClient.deleteSchedulerRun(run.run_id)
+      setRuns((prev) => prev.filter((r) => r.run_id !== run.run_id))
+    } catch (err) {
+      console.error('Failed to delete run record:', err)
     }
   }
 
@@ -466,6 +505,16 @@ const RecordsView: React.FC<{
                     <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-inset text-content-tertiary flex-shrink-0">
                       {trigger}
                     </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void deleteRun(run)
+                      }}
+                      title={t('records_delete')}
+                      className="text-content-tertiary hover:text-danger flex-shrink-0 p-0.5 cursor-pointer transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
 
                   {run.status === 'error' && run.error ? (
@@ -497,6 +546,24 @@ const RecordsView: React.FC<{
                 </div>
               )
             })}
+            {hasMore && (
+              <div className="flex justify-center py-3">
+                <button
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  className="px-4 py-1.5 text-sm rounded-btn border border-strong text-content-secondary hover:bg-surface-2 cursor-pointer transition-colors disabled:opacity-60"
+                >
+                  {loadingMore ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 size={14} className="animate-spin" />
+                      {t('records_loading')}
+                    </span>
+                  ) : (
+                    t('records_load_more')
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -518,6 +585,8 @@ const RunDetailModal: React.FC<{ run: SchedulerRun; onClose: () => void }> = ({
   const [detail, setDetail] = useState<SchedulerRunDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [instances, setInstances] = useState<SchedulerInstance[]>([])
+  // Output view: rendered markdown (default) or raw text, mirroring the web UI.
+  const [outputView, setOutputView] = useState<'preview' | 'text'>('preview')
   const multiAgent = useAgentStore(selectMultiAgent)
 
   useEffect(() => {
@@ -631,15 +700,45 @@ const RunDetailModal: React.FC<{ run: SchedulerRun; onClose: () => void }> = ({
       )}
 
       <div className="mt-4">
-        <div className="text-xs text-content-tertiary mb-1">{t('record_detail_output')}</div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-xs text-content-tertiary">{t('record_detail_output')}</div>
+          {!loading && body && (
+            <div className="inline-flex rounded-md border border-default overflow-hidden text-[11px]">
+              <button
+                onClick={() => setOutputView('preview')}
+                className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                  outputView === 'preview'
+                    ? 'bg-content text-surface'
+                    : 'text-content-tertiary hover:text-content-secondary'
+                }`}
+              >
+                {t('record_detail_view_preview')}
+              </button>
+              <button
+                onClick={() => setOutputView('text')}
+                className={`px-2 py-0.5 cursor-pointer transition-colors ${
+                  outputView === 'text'
+                    ? 'bg-content text-surface'
+                    : 'text-content-tertiary hover:text-content-secondary'
+                }`}
+              >
+                {t('record_detail_view_text')}
+              </button>
+            </div>
+          )}
+        </div>
         {loading ? (
           <div className="flex items-center gap-2 text-content-tertiary text-sm py-4">
             <Loader2 size={14} className="animate-spin" />
             {t('record_detail_loading')}
           </div>
         ) : body ? (
-          <div className="rounded-btn border border-default bg-inset px-3 py-2 text-sm text-content whitespace-pre-wrap break-words max-h-80 overflow-y-auto">
-            {body}
+          <div className="rounded-btn border border-default bg-inset px-3 py-2 text-sm text-content break-words max-h-80 overflow-y-auto">
+            {outputView === 'text' ? (
+              <div className="whitespace-pre-wrap">{body}</div>
+            ) : (
+              <Markdown content={body} />
+            )}
           </div>
         ) : (
           <p className="text-sm text-content-tertiary italic py-2">{t('records_no_output')}</p>

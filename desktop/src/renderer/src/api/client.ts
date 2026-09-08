@@ -944,15 +944,25 @@ class ApiClient {
   // send an explicit empty agent_id so the backend returns the whole team's
   // history (mirroring the task list); single-Agent mode omits the param.
   // Pass a taskId to narrow to one task's runs.
-  async getSchedulerRuns(taskId = '', limit = 100): Promise<SchedulerRun[]> {
+  async getSchedulerRuns(taskId = '', limit = 100, offset = 0): Promise<SchedulerRun[]> {
     const qs = new URLSearchParams()
     if (this.activeAgentId) qs.set('agent_id', '')
     if (taskId) qs.set('task_id', taskId)
     if (limit) qs.set('limit', String(limit))
+    if (offset) qs.set('offset', String(offset))
     const query = qs.toString()
     const path = query ? `/api/scheduler/runs?${query}` : '/api/scheduler/runs'
     const data = await this.request<{ status: string; runs: SchedulerRun[] }>(path)
     return data.runs || []
+  }
+
+  // Delete a single execution-history record from the runs ledger. Removes only
+  // the list item; the delivered message in the session history is untouched.
+  async deleteSchedulerRun(runId: string): Promise<void> {
+    await this.request<{ status: string }>('/api/scheduler/runs/delete', {
+      method: 'POST',
+      body: JSON.stringify({ run_id: runId }),
+    })
   }
 
   // Runs across ALL Agents that started after `since` (epoch seconds). Powers

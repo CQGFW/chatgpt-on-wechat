@@ -634,9 +634,13 @@ def _remember_delivered_output(
 
 
 # Longest delivered-content snippet stored on a scheduler run for at-a-glance
-# history ("what did this task actually send?"). Kept short so the runs sidecar
-# stays a light index, not a second copy of the message body.
-_OUTPUT_PREVIEW_LIMIT = 500
+# history ("what did this task actually send?"). The complete text also lives in
+# the receiver's session and is recovered on demand via get_run_detail, but that
+# session copy is pruned aggressively (only the last few scheduler pairs survive)
+# — so this preview is the durable, always-available record and is kept roomy
+# enough to stand alone in the detail view. When the body exceeds this we append
+# an ellipsis so a truncated preview never looks like the whole message.
+_OUTPUT_PREVIEW_LIMIT = 1000
 
 
 def _record_scheduler_run(task: dict, agent_id: str, trigger: str = "scheduled"):
@@ -746,7 +750,12 @@ def _run_scheduled_task(
             extras = None
             preview = (sink.get("preview") or "").strip()
             if preview:
-                extras = {"output_preview": preview[:_OUTPUT_PREVIEW_LIMIT]}
+                # Append an ellipsis on truncation so a clipped preview never
+                # reads as the complete message (the full body is recoverable
+                # via get_run_detail's join back to the session).
+                if len(preview) > _OUTPUT_PREVIEW_LIMIT:
+                    preview = preview[:_OUTPUT_PREVIEW_LIMIT].rstrip() + "…"
+                extras = {"output_preview": preview}
             try:
                 store.finish_run(run_id, status=status, error=error, extras=extras)
             except Exception as e:

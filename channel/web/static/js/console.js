@@ -314,6 +314,9 @@ const I18N = {
         records_status_done: '成功', records_status_error: '失败', records_status_running: '执行中',
         records_trigger_scheduled: '定时触发', records_trigger_manual: '手动执行',
         records_duration: '耗时', records_no_output: '（无内容）',
+        records_load_more: '加载更多', records_delete: '删除',
+        records_delete_confirm_title: '删除执行记录', records_delete_confirm_msg: '确定删除这条执行记录吗？此操作不可恢复。',
+        records_delete_failed: '删除失败，请重试',
         record_detail_title: '执行详情', record_detail_loading: '加载详情中...',
         record_detail_status: '状态', record_detail_trigger: '触发方式',
         record_detail_started: '开始时间', record_detail_duration: '耗时',
@@ -799,6 +802,9 @@ const I18N = {
         records_status_done: '成功', records_status_error: '失敗', records_status_running: '執行中',
         records_trigger_scheduled: '定時觸發', records_trigger_manual: '手動執行',
         records_duration: '耗時', records_no_output: '（無內容）',
+        records_load_more: '載入更多', records_delete: '刪除',
+        records_delete_confirm_title: '刪除執行記錄', records_delete_confirm_msg: '確定刪除這條執行記錄嗎？此操作不可復原。',
+        records_delete_failed: '刪除失敗，請重試',
         record_detail_title: '執行詳情', record_detail_loading: '載入詳情中...',
         record_detail_status: '狀態', record_detail_trigger: '觸發方式',
         record_detail_started: '開始時間', record_detail_duration: '耗時',
@@ -1279,6 +1285,9 @@ const I18N = {
         records_status_done: 'Success', records_status_error: 'Failed', records_status_running: 'Running',
         records_trigger_scheduled: 'Scheduled', records_trigger_manual: 'Manual',
         records_duration: 'Duration', records_no_output: '(no content)',
+        records_load_more: 'Load more', records_delete: 'Delete',
+        records_delete_confirm_title: 'Delete record', records_delete_confirm_msg: 'Delete this execution record? This cannot be undone.',
+        records_delete_failed: 'Delete failed, please retry',
         record_detail_title: 'Execution detail', record_detail_loading: 'Loading detail...',
         record_detail_status: 'Status', record_detail_trigger: 'Trigger',
         record_detail_started: 'Started', record_detail_duration: 'Duration',
@@ -13727,6 +13736,11 @@ function runChannelDisplay(run) {
     return { type: run.channel_type || '', name: (inst && inst.name) || run.instance_id || '' };
 }
 
+const RUNS_PAGE_SIZE = 30;
+let runsOffset = 0;
+let runsHasMore = false;
+let runsLoadingMore = false;
+
 function loadRunsView() {
     if (runsLoaded) return;
     const rosterReady = agentCatalog.length ? Promise.resolve() : loadAgentCatalog();
@@ -13735,10 +13749,11 @@ function loadRunsView() {
     const listEl = document.getElementById('runs-list');
     loadingEl.classList.remove('hidden'); loadingEl.classList.add('flex');
     emptyEl.classList.add('hidden'); listEl.classList.add('hidden');
+    runsOffset = 0; runsHasMore = false;
 
     rosterReady.then(() => Promise.all([
         // Empty agent_id => whole team's history (not the active chat Agent).
-        fetch('/api/scheduler/runs?agent_id=&limit=200').then(r => r.json()).catch(() => null),
+        fetch(`/api/scheduler/runs?agent_id=&limit=${RUNS_PAGE_SIZE}&offset=0`).then(r => r.json()).catch(() => null),
         // Instances feed the friendly channel-name resolution; cached in taskInstances.
         (taskInstances && taskInstances.length)
             ? Promise.resolve({ status: 'success', instances: taskInstances })
@@ -13757,7 +13772,48 @@ function loadRunsView() {
         listEl.classList.remove('hidden');
         listEl.innerHTML = '';
         runs.forEach(run => listEl.appendChild(renderRunCard(run)));
+        runsOffset = runs.length;
+        runsHasMore = runs.length >= RUNS_PAGE_SIZE;
+        renderRunsLoadMore();
     });
+}
+
+// Append the next page of records. A full page implies there may be more.
+function loadMoreRuns() {
+    if (runsLoadingMore || !runsHasMore) return;
+    runsLoadingMore = true;
+    const btn = document.getElementById('runs-load-more-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = `<i class="fas fa-spinner fa-spin mr-1"></i>${t('records_loading')}`; }
+    fetch(`/api/scheduler/runs?agent_id=&limit=${RUNS_PAGE_SIZE}&offset=${runsOffset}`)
+        .then(r => r.json()).catch(() => null)
+        .then(data => {
+            runsLoadingMore = false;
+            const runs = (data && data.status === 'success') ? (data.runs || []) : [];
+            const listEl = document.getElementById('runs-list');
+            runs.forEach(run => listEl.appendChild(renderRunCard(run)));
+            runsOffset += runs.length;
+            runsHasMore = runs.length >= RUNS_PAGE_SIZE;
+            renderRunsLoadMore();
+        });
+}
+
+// Render (or remove) the "load more" footer button below the list.
+function renderRunsLoadMore() {
+    const listEl = document.getElementById('runs-list');
+    if (!listEl) return;
+    let footer = document.getElementById('runs-load-more');
+    if (!runsHasMore) { if (footer) footer.remove(); return; }
+    if (!footer) {
+        footer = document.createElement('div');
+        footer.id = 'runs-load-more';
+        footer.className = 'flex justify-center py-3';
+        footer.innerHTML = `<button id="runs-load-more-btn" class="px-4 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-white/10 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-white/20 transition-colors">${t('records_load_more')}</button>`;
+        footer.querySelector('#runs-load-more-btn').addEventListener('click', loadMoreRuns);
+    } else {
+        const b = footer.querySelector('#runs-load-more-btn');
+        if (b) { b.disabled = false; b.innerHTML = t('records_load_more'); }
+    }
+    listEl.parentElement.appendChild(footer);
 }
 
 function renderRunCard(run) {
@@ -13779,6 +13835,7 @@ function renderRunCard(run) {
             ${ownerChip}
             <div class="flex-1"></div>
             <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-400 dark:text-slate-500">${escapeHtml(trigger)}</span>
+            <button class="run-delete-btn text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 transition-colors px-1" title="${t('records_delete')}"><i class="fas fa-trash-can text-xs"></i></button>
         </div>
         ${bodyLine}
         <div class="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
@@ -13786,7 +13843,42 @@ function renderRunCard(run) {
             ${duration ? `<span class="opacity-50">·</span><span>${t('records_duration')} ${duration}</span>` : ''}
         </div>`;
     card.addEventListener('click', () => showRunDetailModal(run));
+    const delBtn = card.querySelector('.run-delete-btn');
+    if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();   // don't open the detail modal
+            deleteRunRecord(run, card);
+        });
+    }
     return card;
+}
+
+// Confirm, then delete one execution record and drop its card from the list.
+function deleteRunRecord(run, card) {
+    showConfirmDialog({
+        title: t('records_delete_confirm_title'),
+        message: t('records_delete_confirm_msg'),
+        okText: t('records_delete'),
+        onConfirm: () => {
+            fetch('/api/scheduler/runs/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ run_id: run.run_id })
+            }).then(r => r.json()).then(res => {
+                if (res.status !== 'success') throw new Error(res.message || 'delete failed');
+                card.remove();
+                if (runsOffset > 0) runsOffset -= 1;   // keep paging offset aligned
+                const listEl = document.getElementById('runs-list');
+                if (listEl && listEl.children.length === 0 && !runsHasMore) {
+                    const emptyEl = document.getElementById('runs-empty');
+                    listEl.classList.add('hidden');
+                    if (emptyEl) { emptyEl.classList.remove('hidden'); emptyEl.classList.add('flex'); }
+                }
+            }).catch(() => {
+                alert(t('records_delete_failed'));
+            });
+        }
+    });
 }
 
 function showRunDetailModal(run) {
@@ -13858,7 +13950,12 @@ function renderRunDetailOutput() {
         outEl.textContent = runDetailBody;
     } else {
         outEl.classList.remove('whitespace-pre-wrap');
-        outEl.innerHTML = `<div class="agent-content-body">${renderMarkdown(runDetailBody)}</div>`;
+        // Use .msg-content (not just .agent-content-body): the full markdown
+        // styling — paragraph spacing, headings, lists, tables, code — is scoped
+        // to .msg-content. Without it Tailwind's preflight resets p/h margins to
+        // 0, so a multi-paragraph body renders as one flat block with no visible
+        // breaks (the "no markdown newlines" bug).
+        outEl.innerHTML = `<div class="msg-content agent-content-body">${renderMarkdown(runDetailBody)}</div>`;
     }
 }
 

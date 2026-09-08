@@ -105,7 +105,12 @@ def test_output_preview_is_truncated(monkeypatch, one_agent):
     integration._run_scheduled_task(_task(), agent_bridge=object(), agent_id="default")
 
     extras = get_conversation_store().list_runs(task_source="scheduler")[0]["extras"]
-    assert len(extras["output_preview"]) == integration._OUTPUT_PREVIEW_LIMIT
+    preview = extras["output_preview"]
+    # Truncated to the limit plus a trailing ellipsis so a clipped preview never
+    # reads as the whole message.
+    assert preview.endswith("…")
+    assert len(preview.rstrip("…")) <= integration._OUTPUT_PREVIEW_LIMIT
+    assert len(preview) == integration._OUTPUT_PREVIEW_LIMIT + 1
 
 
 def test_failed_delivery_is_recorded_error(monkeypatch, one_agent):

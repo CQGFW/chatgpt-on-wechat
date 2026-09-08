@@ -1354,6 +1354,7 @@ class ConversationStore:
         agent_id: Optional[str] = None,
         since: Optional[int] = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """List runs, newest first, filtered by any combination of the given
         dimensions. ``parent_run_id=''`` selects top-level runs only.
@@ -1361,6 +1362,10 @@ class ConversationStore:
         ``since`` keeps only runs that *started strictly after* the given epoch
         seconds; it powers the client's cross-session scheduler poll, which asks
         "any new executions since I last checked?" without re-fetching history.
+
+        ``offset`` skips the first N rows for paging the history list ("load
+        more"). Combined with the stable ``started_at DESC, run_id DESC`` order
+        it gives deterministic pages.
 
         Unlike the conversation methods this is intentionally *not* scoped to the
         store's bound ``self._agent_id``: the runs table is one global ledger and
@@ -1395,17 +1400,43 @@ class ConversationStore:
             params.append(since)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(max(1, limit))
+        params.append(max(0, offset))
         with self._lock:
             conn = self._connect()
             try:
                 rows = conn.execute(
                     f"SELECT {self._RUN_COLUMNS} FROM runs {where} "
-                    "ORDER BY started_at DESC, run_id DESC LIMIT ?",
+                    "ORDER BY started_at DESC, run_id DESC LIMIT ? OFFSET ?",
                     tuple(params),
                 ).fetchall()
             finally:
                 conn.close()
         return [self._run_row_to_dict(r) for r in rows]
+
+    def delete_run(self, run_id: str, agent_id: Optional[str] = None) -> bool:
+        """Delete a single run row. Returns True if a row was removed.
+
+        Only touches the ``runs`` ledger entry (the history-list item); the
+        delivered message persisted in the session history is left intact. When
+        ``agent_id`` is given the delete is scoped to that Agent so one Agent
+        cannot remove another's run by id alone.
+        """
+        if not self._runs_ready or not run_id:
+            return False
+        clauses = ["run_id = ?"]
+        params: List[Any] = [run_id]
+        if agent_id is not None:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
+        where = " AND ".join(clauses)
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(f"DELETE FROM runs WHERE {where}", tuple(params))
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
 
     def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
         """A run plus the full text it delivered, for a history detail view.

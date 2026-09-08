@@ -50,6 +50,55 @@ def test_list_runs_agent_id_filter_scopes_or_aggregates():
         assert {r["run_id"] for r in store.list_runs(agent_id="")} == {"r-default"}
 
 
+def test_list_runs_offset_pages_history():
+    """offset skips the first N rows so the history list can "load more"."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _store(tmp)
+        for i in range(5):
+            store.create_run(f"r-{i}", task_source="scheduler", task_id="t")
+
+        page1 = store.list_runs(task_source="scheduler", limit=2, offset=0)
+        page2 = store.list_runs(task_source="scheduler", limit=2, offset=2)
+        page3 = store.list_runs(task_source="scheduler", limit=2, offset=4)
+
+        assert len(page1) == 2 and len(page2) == 2 and len(page3) == 1
+        # Pages are disjoint and together cover every run exactly once.
+        seen = [r["run_id"] for r in page1 + page2 + page3]
+        assert sorted(seen) == [f"r-{i}" for i in range(5)]
+
+
+def test_delete_run_removes_only_that_row():
+    """delete_run drops one ledger row; others survive and it's a no-op twice."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _store(tmp)
+        store.create_run("keep", task_source="scheduler", task_id="t")
+        store.create_run("drop", task_source="scheduler", task_id="t")
+
+        assert store.delete_run("drop") is True
+        remaining = {r["run_id"] for r in store.list_runs(task_source="scheduler")}
+        assert remaining == {"keep"}
+
+        # Deleting an already-gone / unknown id is a harmless no-op.
+        assert store.delete_run("drop") is False
+        assert store.delete_run("nope") is False
+
+
+def test_delete_run_agent_scope_guards_cross_agent():
+    """An explicit agent_id scopes the delete so one Agent can't remove
+    another's run by id alone."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _store(tmp)
+        store.create_run("r-sales", agent_id="sales", task_source="scheduler", task_id="t")
+
+        # Wrong agent scope: nothing removed.
+        assert store.delete_run("r-sales", agent_id="pm") is False
+        assert {r["run_id"] for r in store.list_runs(task_source="scheduler")} == {"r-sales"}
+
+        # Correct scope removes it.
+        assert store.delete_run("r-sales", agent_id="sales") is True
+        assert store.list_runs(task_source="scheduler") == []
+
+
 def test_list_runs_since_returns_only_newer_runs():
     """``since`` (epoch seconds) keeps only runs started strictly after it,
     powering the client's cross-session scheduler poll ("anything new since I

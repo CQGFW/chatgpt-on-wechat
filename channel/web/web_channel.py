@@ -2204,6 +2204,7 @@ class WebChannel(ChatChannel):
             '/api/knowledge/import', 'KnowledgeImportHandler',
             '/api/scheduler', 'SchedulerHandler',
             '/api/scheduler/runs/detail', 'SchedulerRunDetailHandler',
+            '/api/scheduler/runs/delete', 'SchedulerRunDeleteHandler',
             '/api/scheduler/runs', 'SchedulerRunsHandler',
             '/api/scheduler/run', 'SchedulerRunHandler',
             '/api/scheduler/toggle', 'SchedulerToggleHandler',
@@ -6642,13 +6643,19 @@ class SchedulerRunsHandler:
         _require_auth()
         web.header('Content-Type', 'application/json; charset=utf-8')
         try:
-            params = web.input(agent_id='', task_id='', limit='100', since='')
+            params = web.input(agent_id='', task_id='', limit='100', since='', offset='0')
             requested = _request_agent_id(params)
             task_id = (getattr(params, 'task_id', '') or '').strip()
             try:
                 limit = max(1, min(500, int(params.limit)))
             except (TypeError, ValueError):
                 limit = 100
+            # ``offset`` pages the history list ("load more"). Cross-session poll
+            # callers omit it (default 0).
+            try:
+                offset = max(0, int(getattr(params, 'offset', '0') or 0))
+            except (TypeError, ValueError):
+                offset = 0
             # ``since`` (epoch seconds) powers the client's cross-session
             # scheduler poll: return only executions started after the last one
             # it saw, so a background window/tab can surface a notification for a
@@ -6670,6 +6677,7 @@ class SchedulerRunsHandler:
                 agent_id=requested,  # None -> whole team; '' -> default Agent
                 since=since,
                 limit=limit,
+                offset=offset,
             )
             # Flatten the light extras index onto each row so the client needs no
             # knowledge of the sidecar shape.
@@ -6716,6 +6724,36 @@ class SchedulerRunDetailHandler:
             return json.dumps({"status": "success", "run": detail}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler run detail API error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerRunDeleteHandler:
+    """Delete a single execution-history record from the runs ledger.
+
+    Removes only the ledger row (the list item); the delivered message kept in
+    the session history is untouched. Accepts run_id in the JSON body.
+    """
+
+    def POST(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            body = json.loads(web.data()) if web.data() else {}
+            run_id = (body.get("run_id") or "").strip()
+            if not run_id:
+                return json.dumps({"status": "error", "message": "run_id required"})
+
+            from agent.memory import get_conversation_store
+            store = get_conversation_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "store unavailable"})
+
+            deleted = store.delete_run(run_id)
+            if not deleted:
+                return json.dumps({"status": "error", "message": "run not found"})
+            return json.dumps({"status": "success"}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler run delete API error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 
