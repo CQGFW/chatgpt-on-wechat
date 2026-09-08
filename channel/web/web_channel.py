@@ -4228,7 +4228,7 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply")
+    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng")
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
@@ -4237,6 +4237,8 @@ class ModelsHandler:
         "linkai":  {"zh": "LinkAI", "en": "LinkAI"},
         "anysearch": {"zh": "AnySearch", "en": "AnySearch"},
         "serply":  {"zh": "Serply", "en": "Serply"},
+        "tavily":  {"zh": "Tavily", "en": "Tavily"},
+        "searxng": {"zh": "SearXNG", "en": "SearXNG"},
     }
 
     @classmethod
@@ -4262,6 +4264,12 @@ class ModelsHandler:
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
             return (block.get("serply_api_key") if isinstance(block, dict) else "") or os.environ.get(
                 "SERPLY_API_KEY", "")
+        if provider == "tavily":
+            tools_cfg = local_config.get("tools") or {}
+            block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
+            return (block.get("tavily_api_key") if isinstance(block, dict) else "") or os.environ.get(
+                "TAVILY_API_KEY", "")
+        # searxng uses an instance URL, not an API key — handled in _search_capability
         return ""
 
     @classmethod
@@ -4276,6 +4284,7 @@ class ModelsHandler:
             ws_cfg = {}
 
         anonymous_on = bool(ws_cfg.get("anysearch_anonymous"))
+        searxng_url = (ws_cfg.get("searxng_url") or "").strip() if isinstance(ws_cfg, dict) else ""
         providers = []
         configured_ids = []
         for pid in cls._SEARCH_PROVIDERS:
@@ -4283,6 +4292,9 @@ class ModelsHandler:
             if pid == "anysearch":
                 # AnySearch: real key, or an explicit anonymous opt-in.
                 ok = cls._is_real_key(raw_key) or anonymous_on
+            elif pid == "searxng":
+                # SearXNG: self-hosted, no auth — available when instance URL is set.
+                ok = bool(searxng_url)
             else:
                 ok = cls._is_real_key(raw_key)
             providers.append({
@@ -4294,7 +4306,11 @@ class ModelsHandler:
                 # this hint to decide which credential editor to surface.
                 # Lets the frontend badge "匿名/anonymous" only in anonymous mode.
                 "anonymous": pid == "anysearch" and ok and not raw_key,
-                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply"),
+                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply", "tavily"),
+                "needs_url": pid == "searxng",
+                # SearXNG stores an instance URL (not a secret), so echo it back
+                # verbatim to prefill/edit; other providers mask their key.
+                "url_masked": searxng_url if pid == "searxng" else "",
                 "api_key_masked": ConfigHandler._mask_key(raw_key) if raw_key else "",
             })
             if ok:
@@ -5241,7 +5257,7 @@ class ModelsHandler:
         reuse model-vendor credentials and go through set_provider instead.
         """
         provider = (data.get("provider") or "bocha").strip().lower()
-        if provider not in ("bocha", "anysearch", "serply"):
+        if provider not in ("bocha", "anysearch", "serply", "tavily", "searxng"):
             return json.dumps({"status": "error", "message": f"unsupported search provider: {provider!r}"})
 
         if provider == "anysearch":
@@ -5263,6 +5279,16 @@ class ModelsHandler:
             self._write_file_config(file_cfg)
             logger.info(
                 f"[ModelsHandler] search credential set: anysearch_api_key={'***' if api_key else ''}, anonymous={bool(anonymous and not api_key)}")
+            return json.dumps({"status": "success", "provider": provider})
+        if provider == "searxng":
+            # SearXNG uses an instance URL, not an API key.
+            instance_url = (data.get("url") or "").strip() if isinstance(data.get("url"), str) else ""
+            local_config = conf()
+            file_cfg = self._read_file_config()
+            self._set_nested_namespace_value(local_config, "tools", "web_search", "searxng_url", instance_url)
+            self._set_nested_namespace_value(file_cfg, "tools", "web_search", "searxng_url", instance_url)
+            self._write_file_config(file_cfg)
+            logger.info(f"[ModelsHandler] search credential set: searxng_url={'***' if instance_url else ''}")
             return json.dumps({"status": "success", "provider": provider})
         else:
             key_field = f"{provider}_api_key"

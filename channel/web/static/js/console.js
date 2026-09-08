@@ -157,6 +157,10 @@ const I18N = {
         models_search_anysearch_desc: '前往 anysearch.com 控制台创建 API Key。',
         models_search_serply_title: '配置 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台创建 API Key。',
+        models_search_tavily_title: '配置 Tavily API Key',
+        models_search_tavily_desc: '前往 tavily.com 控制台创建 API Key。',
+        models_search_searxng_title: '配置 SearXNG 实例 URL',
+        models_search_searxng_desc: '输入自托管 SearXNG 实例的 URL（无需 API Key）。',
         models_search_anysearch_anon_hint: '留空可启用匿名模式（无需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
@@ -645,6 +649,10 @@ const I18N = {
         models_search_anysearch_desc: '前往 anysearch.com 控制台建立 API Key',
         models_search_serply_title: '設定 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台建立 API Key',
+        models_search_tavily_title: '設定 Tavily API Key',
+        models_search_tavily_desc: '前往 tavily.com 控制台建立 API Key',
+        models_search_searxng_title: '設定 SearXNG 實例 URL',
+        models_search_searxng_desc: '輸入自託管 SearXNG 實例的 URL（無需 API Key）。',
         models_search_anysearch_anon_hint: '留空可啟用匿名模式（無需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
@@ -1128,6 +1136,10 @@ const I18N = {
         models_search_anysearch_desc: 'Create a key at the AnySearch console (anysearch.com).',
         models_search_serply_title: 'Configure Serply API Key',
         models_search_serply_desc: 'Create a key at the Serply console (serply.io).',
+        models_search_tavily_title: 'Configure Tavily API Key',
+        models_search_tavily_desc: 'Create a key at the Tavily console (tavily.com).',
+        models_search_searxng_title: 'Configure SearXNG Instance URL',
+        models_search_searxng_desc: 'Enter the URL of your self-hosted SearXNG instance (no API key required).',
         models_search_anysearch_anon_hint: 'Leave empty to enable anonymous mode (no API key required)',
         models_search_anonymous_badge: 'anonymous',
         models_search_anonymous_disable: 'Disable anonymous',
@@ -10959,7 +10971,10 @@ function openSearchAddProviderPicker(missingProviders) {
 }
 
 function _launchSearchProviderConfig(providerId, providerMeta) {
-    if (providerId === 'bocha' || providerId === 'anysearch' || providerId === 'serply') {
+    // Providers that hold their own credential (dedicated key or, for SearXNG,
+    // an instance URL) use the bespoke search-key modal. zhipu/qianfan/linkai
+    // reuse a model-vendor key and go through the vendor modal instead.
+    if (['bocha', 'anysearch', 'serply', 'tavily', 'searxng'].includes(providerId)) {
         openSearchKeyModal(providerId, providerMeta);
     } else {
         openVendorModal(providerId, () => loadModelsView({ preserveScroll: true }));
@@ -11007,8 +11022,17 @@ function openSearchKeyModal(providerId, providerMeta) {
 
     const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
     const prov = (searchCap.providers || []).find(p => p.id === providerId);
-    let masked = (providerMeta && providerMeta.api_key_masked) || '';
-    if (!masked && prov && prov.api_key_masked) masked = prov.api_key_masked;
+    const isSearxng = providerId === 'searxng';
+    // SearXNG holds an instance URL (echoed back verbatim in url_masked); the
+    // rest hold a masked API key. Resolve whichever applies as the field value.
+    let masked;
+    if (isSearxng) {
+        masked = (providerMeta && providerMeta.url_masked) || (prov && prov.url_masked) || '';
+    } else {
+        masked = (providerMeta && providerMeta.api_key_masked) || '';
+        if (!masked && prov && prov.api_key_masked) masked = prov.api_key_masked;
+    }
+    // SearXNG URL is not masked, so it's safe to keep editable (not a sentinel).
     const hasKey = !!masked;
     const isAnonymous = providerId === 'anysearch' && !!((providerMeta && providerMeta.anonymous) || (prov && prov.anonymous));
     const clearBtnHtml = (hasKey || isAnonymous)
@@ -11035,14 +11059,14 @@ function openSearchKeyModal(providerId, providerMeta) {
                     w-full max-w-md mx-4 p-6 shadow-xl">
             <h3 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">${t('models_search_' + providerId + '_title')}</h3>
             <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">${descText}</p>
-            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">API Key</label>
+            <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">${providerId === 'searxng' ? 'Instance URL' : 'API Key'}</label>
             <input id="search-key-input" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
                    class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
                           bg-slate-50 dark:bg-white/5 text-sm text-slate-800 dark:text-slate-100
-                          focus:outline-none focus:border-primary-500 font-mono ${hasKey ? 'cfg-key-masked' : ''}"
+                          focus:outline-none focus:border-primary-500 ${isSearxng ? '' : 'font-mono'} ${(hasKey && !isSearxng) ? 'cfg-key-masked' : ''}"
                    value="${escapeHtml(masked)}"
-                   data-masked="${hasKey ? '1' : ''}"
-                   placeholder="sk-..." />
+                   data-masked="${(hasKey && !isSearxng) ? '1' : ''}"
+                   placeholder="${isSearxng ? 'https://searxng.example.com' : 'sk-...'}" />
             <div class="flex items-center justify-between gap-3 mt-5">
                 <div>${clearBtnHtml}</div>
                 <div class="flex items-center gap-3">
@@ -11126,6 +11150,31 @@ function _saveSearchKey(providerId) {
     return;
 }
 
+    if (providerId === 'searxng') {
+        // SearXNG uses an instance URL, not an API key. Empty input is a no-op
+        // here (use the clear button to remove it).
+        if (!apiKey) {
+            input.focus();
+            return;
+        }
+        fetch('/api/models', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action: 'set_search_credential',
+                provider: providerId,
+                url: apiKey, // reuse the input value as the URL
+            }),
+        }).then(r => r.json()).then(data => {
+            if (data.status === 'success') {
+                const modal = document.getElementById('search-key-modal');
+                if (modal) modal.remove();
+                loadModelsView({ preserveScroll: true });
+            }
+        });
+        return;
+    }
+
     if (!apiKey) {
         input.focus();
         return;
@@ -11144,10 +11193,14 @@ function _saveSearchKey(providerId) {
 }
 
 function _clearSearchKey(providerId) {
+    // SearXNG is cleared by emptying its instance URL, not an API key.
+    const payload = (providerId === 'searxng')
+        ? { action: 'set_search_credential', provider: providerId, url: '' }
+        : { action: 'set_search_credential', provider: providerId, api_key: '' };
     fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set_search_credential', provider: providerId, api_key: '' }),
+        body: JSON.stringify(payload),
     }).then(r => r.json()).then(data => {
         if (data.status === 'success') {
             const modal = document.getElementById('search-key-modal');

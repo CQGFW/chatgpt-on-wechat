@@ -77,13 +77,13 @@ class TestAnySearchKeyResolution(unittest.TestCase):
 
 
 class TestProviderOrder(unittest.TestCase):
-    """New providers are appended after the four originals, leaving existing
-    routing untouched: anysearch first, then serply."""
+    """New providers are appended after the originals, leaving existing routing
+    untouched: anysearch, serply, then tavily and searxng last."""
 
     def test_provider_order_appends_new_providers_last(self):
         self.assertEqual(
             web_search_module.PROVIDER_ORDER,
-            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply"),
+            ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng"),
         )
 
     def test_web_console_provider_list_stays_in_sync(self):
@@ -314,6 +314,203 @@ class TestSerplyBackend(unittest.TestCase):
                         patch.object(web_search_module.requests, "get",
                                      return_value=_fake_response(status_code)):
                     result = self.tool._search_serply("q", 10)
+                self.assertEqual(result.status, "error")
+                self.assertIn(fragment, result.result)
+
+
+class TestTavilyKeyResolution(unittest.TestCase):
+    """The tavily key lives under tools.web_search, falling back to env."""
+
+    def setUp(self):
+        self._prev_env = os.environ.get("TAVILY_API_KEY")
+        os.environ.pop("TAVILY_API_KEY", None)
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("TAVILY_API_KEY", None)
+        else:
+            os.environ["TAVILY_API_KEY"] = self._prev_env
+
+    def test_tavily_key_from_tools_config(self):
+        """tools.web_search.tavily_api_key is resolved, and wins over env."""
+        cfg = {"tools": {"web_search": {"tavily_api_key": "test-key-123"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg):
+            self.assertEqual(web_search_module._get_api_key("tavily"), "test-key-123")
+            with patch.dict(os.environ, {"TAVILY_API_KEY": "env-key-456"}):
+                self.assertEqual(web_search_module._get_api_key("tavily"), "test-key-123")
+
+    def test_tavily_key_env_fallback(self):
+        """Without a config value, TAVILY_API_KEY is used; both empty -> ''."""
+        with patch.object(web_search_module, "conf", lambda: {}):
+            with patch.dict(os.environ, {"TAVILY_API_KEY": "env-key-456"}):
+                self.assertEqual(web_search_module._get_api_key("tavily"), "env-key-456")
+            self.assertEqual(web_search_module._get_api_key("tavily"), "")
+
+
+class TestTavilyBackend(unittest.TestCase):
+    """Behaviour of WebSearch._search_tavily with a stubbed HTTP layer."""
+
+    def setUp(self):
+        self.tool = web_search_module.WebSearch()
+
+    def test_search_tavily_maps_results(self):
+        """Tavily's content/source/score map to the unified output shape, and
+        the query travels in the POST json body alongside the api_key."""
+        payload = {
+            "results": [
+                {"title": "T1", "url": "https://a.example/1", "content": "c1",
+                 "source": "a.example", "score": 0.9},
+                {"title": "T2", "url": "https://a.example/2"},
+            ]
+        }
+        with patch.object(web_search_module, "_get_api_key", return_value="test-key-123"), \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, payload)) as mock_post:
+            result = self.tool._search_tavily("cowagent", 10)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.result["backend"], "tavily")
+        self.assertEqual(result.result["total"], 2)
+        first, second = result.result["results"]
+        self.assertEqual(first["title"], "T1")
+        self.assertEqual(first["url"], "https://a.example/1")
+        self.assertEqual(first["snippet"], "c1")
+        self.assertEqual(first["siteName"], "a.example")
+        self.assertEqual(second["snippet"], "")
+        body = mock_post.call_args[1]["json"]
+        self.assertEqual(body["query"], "cowagent")
+        self.assertEqual(body["api_key"], "test-key-123")
+
+    def test_search_tavily_clamps_count(self):
+        """count is clamped into 1-20 and sent as max_results; falsy -> 10."""
+        with patch.object(web_search_module, "_get_api_key", return_value="k"), \
+                patch.object(web_search_module.requests, "post",
+                             return_value=_fake_response(200, {"results": []})) as mock_post:
+            for count, expected in ((20, 20), (99, 20), (0, 10), (None, 10), (5, 5)):
+                with self.subTest(count=count):
+                    self.tool._search_tavily("q", count)
+                    self.assertEqual(mock_post.call_args[1]["json"]["max_results"], expected)
+
+    def test_search_tavily_error_status_mapping(self):
+        """401/402/429 map to specific messages; other statuses are generic."""
+        cases = {
+            401: "Invalid Tavily API key",
+            402: "quota exhausted",
+            429: "rate limit reached",
+            500: "HTTP 500",
+        }
+        for status_code, fragment in cases.items():
+            with self.subTest(status_code=status_code):
+                with patch.object(web_search_module, "_get_api_key", return_value="k"), \
+                        patch.object(web_search_module.requests, "post",
+                                     return_value=_fake_response(status_code)):
+                    result = self.tool._search_tavily("q", 10)
+                self.assertEqual(result.status, "error")
+                self.assertIn(fragment, result.result)
+
+
+class TestSearxngUrlResolution(unittest.TestCase):
+    """SearXNG resolves an instance URL (not an API key) from config or env."""
+
+    def setUp(self):
+        self._prev_env = os.environ.get("SEARXNG_URL")
+        os.environ.pop("SEARXNG_URL", None)
+
+    def tearDown(self):
+        if self._prev_env is None:
+            os.environ.pop("SEARXNG_URL", None)
+        else:
+            os.environ["SEARXNG_URL"] = self._prev_env
+
+    def test_searxng_url_from_tools_config(self):
+        """tools.web_search.searxng_url is resolved, and wins over env."""
+        cfg = {"tools": {"web_search": {"searxng_url": "https://searx.example"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg):
+            self.assertEqual(web_search_module._get_searxng_url(), "https://searx.example")
+            with patch.dict(os.environ, {"SEARXNG_URL": "https://env.example"}):
+                self.assertEqual(web_search_module._get_searxng_url(), "https://searx.example")
+
+    def test_searxng_url_env_fallback(self):
+        """Without a config value, SEARXNG_URL is used; both empty -> ''."""
+        with patch.object(web_search_module, "conf", lambda: {}):
+            with patch.dict(os.environ, {"SEARXNG_URL": "https://env.example"}):
+                self.assertEqual(web_search_module._get_searxng_url(), "https://env.example")
+            self.assertEqual(web_search_module._get_searxng_url(), "")
+
+    def test_searxng_qualifies_when_url_configured(self):
+        """configured_providers() includes searxng once its URL is set."""
+        cfg = {"tools": {"web_search": {"searxng_url": "https://searx.example"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg):
+            self.assertIn("searxng", web_search_module.configured_providers())
+        with patch.object(web_search_module, "conf", lambda: {}):
+            self.assertNotIn("searxng", web_search_module.configured_providers())
+
+
+class TestSearxngBackend(unittest.TestCase):
+    """Behaviour of WebSearch._search_searxng with a stubbed HTTP layer."""
+
+    def setUp(self):
+        self.tool = web_search_module.WebSearch()
+
+    def test_search_searxng_requires_url(self):
+        """Without an instance URL, the backend fails fast with guidance."""
+        with patch.object(web_search_module, "_get_searxng_url", return_value=""):
+            result = self.tool._search_searxng("q", 10)
+        self.assertEqual(result.status, "error")
+        self.assertIn("SearXNG instance URL not configured", result.result)
+
+    def test_search_searxng_maps_results(self):
+        """content/engine map to snippet/siteName; count clamps the list."""
+        payload = {
+            "results": [
+                {"title": "T1", "url": "https://a.example/1", "content": "c1",
+                 "engine": "duckduckgo", "score": 1.2},
+                {"title": "T2", "url": "https://a.example/2"},
+            ]
+        }
+        with patch.object(web_search_module, "_get_searxng_url", return_value="https://searx.example/"), \
+                patch.object(web_search_module.requests, "get",
+                             return_value=_fake_response(200, payload)) as mock_get:
+            result = self.tool._search_searxng("cowagent", 10)
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.result["backend"], "searxng")
+        self.assertEqual(result.result["total"], 2)
+        first, second = result.result["results"]
+        self.assertEqual(first["snippet"], "c1")
+        self.assertEqual(first["siteName"], "duckduckgo")
+        self.assertEqual(second["snippet"], "")
+        # Trailing slash on the instance URL is normalized; format=json is used.
+        url = mock_get.call_args[0][0]
+        self.assertIn("https://searx.example/search?", url)
+        self.assertIn("format=json", url)
+
+    def test_search_searxng_non_json_response(self):
+        """A non-JSON body maps to a clear error message."""
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json = MagicMock(side_effect=ValueError("not json"))
+        resp.text = "<html>not json</html>"
+        with patch.object(web_search_module, "_get_searxng_url", return_value="https://searx.example"), \
+                patch.object(web_search_module.requests, "get", return_value=resp):
+            result = self.tool._search_searxng("q", 10)
+        self.assertEqual(result.status, "error")
+        self.assertIn("non-JSON response", result.result)
+
+    def test_search_searxng_error_status_mapping(self):
+        """401/403/429 map to specific messages; other statuses are generic."""
+        cases = {
+            401: "requires authentication",
+            403: "access forbidden",
+            429: "rate limit reached",
+            500: "HTTP 500",
+        }
+        for status_code, fragment in cases.items():
+            with self.subTest(status_code=status_code):
+                with patch.object(web_search_module, "_get_searxng_url", return_value="https://searx.example"), \
+                        patch.object(web_search_module.requests, "get",
+                                     return_value=_fake_response(status_code)):
+                    result = self.tool._search_searxng("q", 10)
                 self.assertEqual(result.status, "error")
                 self.assertIn(fragment, result.result)
 
