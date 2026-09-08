@@ -422,15 +422,44 @@ const ModeTab: React.FC<{ icon: LucideIcon; label: string; active: boolean; onCl
   </button>
 )
 
-// Inline rename for a channel instance's friendly name (e.g. "微信2"), mirroring
-// the web console's pencil-edit. Saving only sets a display label; it never
-// touches credentials or the live connection. Enter commits unless an IME
-// composition is active (so typing English via a Chinese IME isn't cut short).
-const InstanceNameEditor: React.FC<{ channel: ChannelInfo; onRenamed: () => void }> = ({
-  channel,
-  onRenamed,
-}) => {
-  const current = channel.instance_name || channel.instance_id || channel.name
+// The connection status dot + label (waiting-to-scan / starting / connected),
+// shared by the instance and non-instance title rows.
+const StatusBadge: React.FC<{ channel: ChannelInfo; pending: Pending }> = ({ channel, pending }) => (
+  <>
+    <span
+      className={`w-2 h-2 rounded-full flex-shrink-0 ${
+        pending !== 'none'
+          ? 'bg-warning animate-pulse'
+          : channel.active
+            ? 'bg-accent'
+            : 'bg-content-tertiary'
+      }`}
+    />
+    {pending === 'scanning' ? (
+      <span className={`text-xs ${channel.login_status === 'scanned' ? 'text-accent' : 'text-warning'}`}>
+        {channel.login_status === 'scanned' ? t('weixin_scan_scanned') : t('weixin_scan_waiting')}
+      </span>
+    ) : pending === 'starting' ? (
+      <span className="text-xs text-warning">{t('channels_starting')}</span>
+    ) : channel.active ? (
+      <span className="text-xs text-accent">{t('channels_connected')}</span>
+    ) : null}
+  </>
+)
+
+// The title row for an instance card: the friendly instance name as the heading,
+// with an inline pencil-rename (mirroring the web console), followed by whatever
+// status badge the caller passes as children. Saving only sets a display label;
+// it never touches credentials or the live connection. Enter commits unless an
+// IME composition is active (so typing English via a Chinese IME isn't cut short).
+const InstanceNameEditor: React.FC<{
+  channel: ChannelInfo
+  onRenamed: () => void
+  children?: React.ReactNode
+}> = ({ channel, onRenamed, children }) => {
+  // Title falls back to the type label when no friendly name is set yet, so the
+  // heading never reads as a bare id (matches the web console).
+  const current = channel.instance_name || localizedLabel(channel.label)
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState(current)
   const [saving, setSaving] = useState(false)
@@ -452,40 +481,41 @@ const InstanceNameEditor: React.FC<{ channel: ChannelInfo; onRenamed: () => void
     }
   }
 
-  if (!editing) {
+  if (editing) {
     return (
-      <div className="flex items-center gap-1.5 mt-0.5 group/name">
-        <span className="text-xs text-content-tertiary font-mono truncate">{current}</span>
-        <button
-          onClick={() => {
-            setValue(channel.instance_name || '')
-            setEditing(true)
-          }}
-          className="text-content-tertiary hover:text-content-secondary cursor-pointer opacity-0 group-hover/name:opacity-100 transition-opacity"
-          title={t('channels_rename_instance')}
-        >
-          <Pencil size={11} />
-        </button>
-      </div>
+      <input
+        autoFocus
+        value={value}
+        disabled={saving}
+        onChange={(e) => setValue(e.target.value)}
+        onCompositionStart={() => (composingRef.current = true)}
+        onCompositionEnd={() => (composingRef.current = false)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !composingRef.current) void commit()
+          else if (e.key === 'Escape') setEditing(false)
+        }}
+        placeholder={t('channels_instance_name_placeholder')}
+        className="w-44 px-2 py-0.5 rounded-btn border border-strong bg-inset text-sm text-content focus:outline-none focus:border-accent"
+      />
     )
   }
 
   return (
-    <input
-      autoFocus
-      value={value}
-      disabled={saving}
-      onChange={(e) => setValue(e.target.value)}
-      onCompositionStart={() => (composingRef.current = true)}
-      onCompositionEnd={() => (composingRef.current = false)}
-      onBlur={() => void commit()}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !composingRef.current) void commit()
-        else if (e.key === 'Escape') setEditing(false)
-      }}
-      placeholder={t('channels_instance_name_placeholder')}
-      className="mt-0.5 w-40 px-2 py-0.5 rounded-btn border border-strong bg-inset text-xs text-content focus:outline-none focus:border-accent"
-    />
+    <div className="flex items-center gap-2 group/name min-w-0">
+      <span className="font-medium text-sm text-content truncate">{current}</span>
+      <button
+        onClick={() => {
+          setValue(channel.instance_name || '')
+          setEditing(true)
+        }}
+        className="text-content-tertiary hover:text-content-secondary cursor-pointer opacity-0 group-hover/name:opacity-100 transition-opacity flex-shrink-0"
+        title={t('channels_rename_instance')}
+      >
+        <Pencil size={12} />
+      </button>
+      {children}
+    </div>
   )
 }
 
@@ -498,6 +528,9 @@ const ChannelCard: React.FC<{
   // editing the existing one of the same type.
   forceNewInstance?: boolean
 }> = ({ channel, onChanged, defaultExpanded = false, multiAgent = false, forceNewInstance = false }) => {
+  // A per-instance card (multi-Agent mode, with a concrete instance_id) is the
+  // one whose title is the friendly instance name and which can be renamed.
+  const isInstance = multiAgent && !!channel.instance_id
   // Channels with no fields connect purely via QR (e.g. weixin).
   const isQrLogin = channel.fields.length === 0
   // QR provider supported by the desktop scan panel (weixin / feishu).
@@ -617,32 +650,25 @@ const ChannelCard: React.FC<{
       <div className="flex items-center gap-3">
         <ChannelIcon name={channel.name} size={40} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-sm text-content">{localizedLabel(channel.label)}</span>
-            <span
-              className={`w-2 h-2 rounded-full ${
-                pending !== 'none'
-                  ? 'bg-warning animate-pulse'
-                  : channel.active
-                    ? 'bg-accent'
-                    : 'bg-content-tertiary'
-              }`}
-            />
-            {pending === 'scanning' ? (
-              <span className={`text-xs ${channel.login_status === 'scanned' ? 'text-accent' : 'text-warning'}`}>
-                {channel.login_status === 'scanned' ? t('weixin_scan_scanned') : t('weixin_scan_waiting')}
-              </span>
-            ) : pending === 'starting' ? (
-              <span className="text-xs text-warning">{t('channels_starting')}</span>
-            ) : channel.active ? (
-              <span className="text-xs text-accent">{t('channels_connected')}</span>
-            ) : null}
-          </div>
-          {multiAgent && channel.instance_id ? (
-            <InstanceNameEditor channel={channel} onRenamed={onChanged} />
+          {/* Title row. For a multi-Agent instance the friendly instance name is
+              the title (with an inline rename), matching the web console; the
+              subtitle below then carries "type · id". A non-instance card keeps
+              the channel-type label as its title. */}
+          {isInstance ? (
+            <InstanceNameEditor channel={channel} onRenamed={onChanged}>
+              <StatusBadge channel={channel} pending={pending} />
+            </InstanceNameEditor>
           ) : (
-            <p className="text-xs text-content-tertiary font-mono mt-0.5">{channel.instance_id || channel.name}</p>
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm text-content truncate">{localizedLabel(channel.label)}</span>
+              <StatusBadge channel={channel} pending={pending} />
+            </div>
           )}
+          <p className="text-xs text-content-tertiary font-mono mt-0.5 truncate">
+            {isInstance
+              ? `${localizedLabel(channel.label)} · ${channel.instance_id}`
+              : channel.instance_id || channel.name}
+          </p>
         </div>
 
         {channel.active ? (

@@ -323,11 +323,15 @@ export const Modal: React.FC<{
   // Dialog width. 'md' (default) keeps the compact settings dialog; 'lg' gives
   // form-heavy dialogs (e.g. the task editor) more breathing room.
   size?: 'md' | 'lg'
-}> = ({ open, title, onClose, children, footer, headerRight, size = 'md' }) => {
+  // Stack above another open modal. A confirm dialog spawned from inside a modal
+  // (e.g. "delete this task?" over the task editor) must sit on top; both share
+  // the base z-50 otherwise and the later-painted one wins, hiding the confirm.
+  elevated?: boolean
+}> = ({ open, title, onClose, children, footer, headerRight, size = 'md', elevated = false }) => {
   if (!open) return null
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className={`fixed inset-0 ${elevated ? 'z-[60]' : 'z-50'} flex items-center justify-center bg-black/40 p-4`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose()
       }}

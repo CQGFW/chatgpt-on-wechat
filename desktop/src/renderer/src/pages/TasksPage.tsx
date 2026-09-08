@@ -1,10 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Loader2, Clock, CalendarClock, Play, Plus, RefreshCw, Check } from 'lucide-react'
+import {
+  Loader2,
+  Clock,
+  CalendarClock,
+  Play,
+  Plus,
+  RefreshCw,
+  Check,
+  CheckCircle2,
+  XCircle,
+  History,
+} from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { t } from '../i18n'
 import apiClient from '../api/client'
 import type {
   SchedulerTask,
+  SchedulerRun,
+  SchedulerRunDetail,
   TaskSchedule,
   TaskAction,
   SchedulerInstance,
@@ -65,13 +78,20 @@ const FormError: React.FC<{ message: string }> = ({ message }) =>
     </div>
   ) : null
 
+type TabKey = 'tasks' | 'records'
+
 const TasksPage: React.FC<TasksPageProps> = ({ baseUrl }) => {
   const navigate = useNavigate()
+  const [tab, setTab] = useState<TabKey>('tasks')
   const [tasks, setTasks] = useState<SchedulerTask[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<SchedulerTask | null>(null)
   const [creating, setCreating] = useState(false)
   const [runningId, setRunningId] = useState('')
+  // The History tab owns its own data; it registers a reload fn here so the
+  // shared refresh control on the tab row can drive it (saving a header row).
+  const recordsReloadRef = React.useRef<(() => void) | null>(null)
+  const [recordsLoading, setRecordsLoading] = useState(false)
   const multiAgent = useAgentStore(selectMultiAgent)
 
   const loadTasks = async () => {
@@ -122,26 +142,74 @@ const TasksPage: React.FC<TasksPageProps> = ({ baseUrl }) => {
       <div className="px-6 pt-5 pb-3 flex-shrink-0 flex items-start gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-bold text-content">{t('tasks_title')}</h2>
-          <p className="text-xs text-content-tertiary mt-1">{t('tasks_desc')}</p>
+          <p className="text-xs text-content-tertiary mt-1">
+            {tab === 'tasks' ? t('tasks_desc') : t('records_desc')}
+          </p>
         </div>
         <div className="flex-1" />
-        <button
-          onClick={() => void loadTasks()}
-          className="p-2 rounded-btn border border-strong text-content-secondary hover:bg-surface-2 cursor-pointer transition-colors"
-          title={t('tasks_refresh')}
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </button>
-        <button
-          onClick={() => setCreating(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-btn bg-accent text-accent-contrast hover:bg-accent-hover text-sm font-medium cursor-pointer transition-colors"
-        >
-          <Plus size={15} />
-          {t('tasks_new')}
-        </button>
+        {tab === 'tasks' && (
+          <>
+            <button
+              onClick={() => void loadTasks()}
+              className="p-2 rounded-btn border border-strong text-content-secondary hover:bg-surface-2 cursor-pointer transition-colors"
+              title={t('tasks_refresh')}
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            </button>
+            <button
+              onClick={() => setCreating(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-btn bg-accent text-accent-contrast hover:bg-accent-hover text-sm font-medium cursor-pointer transition-colors"
+            >
+              <Plus size={15} />
+              {t('tasks_new')}
+            </button>
+          </>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto border-t border-default">
+      {/* Tab switcher: Tasks | History. Sits on the header's bottom border so the
+          active tab reads as a selected segment, matching the settings tabs. */}
+      <div className="px-6 flex-shrink-0 flex items-center gap-1 border-b border-default">
+        {(['tasks', 'records'] as TabKey[]).map((key) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`relative px-3 py-2 text-sm font-medium cursor-pointer transition-colors ${
+              tab === key
+                ? 'text-content'
+                : 'text-content-tertiary hover:text-content-secondary'
+            }`}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              {key === 'tasks' ? <CalendarClock size={14} /> : <History size={14} />}
+              {key === 'tasks' ? t('tasks_tab_tasks') : t('tasks_tab_records')}
+            </span>
+            {tab === key && (
+              <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-accent rounded-full" />
+            )}
+          </button>
+        ))}
+        <div className="flex-1" />
+        {/* History tab: refresh lives here on the tab row rather than in its own
+            body header, so it costs no vertical space. */}
+        {tab === 'records' && (
+          <button
+            onClick={() => recordsReloadRef.current?.()}
+            className="p-1.5 rounded-btn text-content-tertiary hover:text-content-secondary hover:bg-surface-2 cursor-pointer transition-colors"
+            title={t('records_refresh')}
+          >
+            <RefreshCw size={14} className={recordsLoading ? 'animate-spin' : ''} />
+          </button>
+        )}
+      </div>
+
+      {tab === 'records' ? (
+        <RecordsView
+          registerReload={(fn) => (recordsReloadRef.current = fn)}
+          onLoadingChange={setRecordsLoading}
+        />
+      ) : (
+      <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-6 py-5">
           {loading ? (
             <div className="flex items-center justify-center py-20 text-content-tertiary">
@@ -233,6 +301,7 @@ const TasksPage: React.FC<TasksPageProps> = ({ baseUrl }) => {
           )}
         </div>
       </div>
+      )}
 
       {editing && (
         <TaskEditModal
@@ -259,6 +328,324 @@ const TasksPage: React.FC<TasksPageProps> = ({ baseUrl }) => {
         />
       )}
     </div>
+  )
+}
+
+// ------------------------------------------------------------------
+// Execution history tab: the runs the scheduler wrote to the global ledger,
+// newest first. Read-only; each row shows outcome, when it ran, how it fired,
+// and a peek at what was delivered.
+// ------------------------------------------------------------------
+
+const formatRunTime = (sec?: number | null): string => {
+  if (!sec) return '--'
+  const d = new Date(sec * 1000)
+  return isNaN(d.getTime()) ? '--' : d.toLocaleString()
+}
+
+// Compact elapsed time between start and end (blank while still running).
+const formatDuration = (start?: number, end?: number | null): string => {
+  if (!start || !end || end < start) return ''
+  const s = end - start
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r ? `${m}m ${r}s` : `${m}m`
+}
+
+const RunStatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  if (status === 'done') {
+    return (
+      <span className="inline-flex items-center gap-1 text-success">
+        <CheckCircle2 size={13} />
+        <span className="text-xs font-medium">{t('records_status_done')}</span>
+      </span>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="inline-flex items-center gap-1 text-danger">
+        <XCircle size={13} />
+        <span className="text-xs font-medium">{t('records_status_error')}</span>
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-content-tertiary">
+      <Loader2 size={13} className="animate-spin" />
+      <span className="text-xs font-medium">{t('records_status_running')}</span>
+    </span>
+  )
+}
+
+const RecordsView: React.FC<{
+  registerReload: (fn: () => void) => void
+  onLoadingChange: (loading: boolean) => void
+}> = ({ registerReload, onLoadingChange }) => {
+  const navigate = useNavigate()
+  const [runs, setRuns] = useState<SchedulerRun[]>([])
+  const [loading, setLoading] = useState(true)
+  const [detailRun, setDetailRun] = useState<SchedulerRun | null>(null)
+  const multiAgent = useAgentStore(selectMultiAgent)
+
+  const loadRuns = async () => {
+    try {
+      setLoading(true)
+      onLoadingChange(true)
+      const data = await apiClient.getSchedulerRuns()
+      setRuns(data || [])
+    } catch (err) {
+      console.error('Failed to load run history:', err)
+      setRuns([])
+    } finally {
+      setLoading(false)
+      onLoadingChange(false)
+    }
+  }
+
+  useEffect(() => {
+    registerReload(() => void loadRuns())
+    void loadRuns()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  return (
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-6 py-5">
+        {loading ? (
+          <div className="flex items-center justify-center py-20 text-content-tertiary">
+            <Loader2 size={18} className="animate-spin mr-2" />
+            {t('records_loading')}
+          </div>
+        ) : runs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <History size={32} className="mb-3 text-content-tertiary opacity-60" />
+            <p className="text-content font-medium mb-1">{t('records_empty')}</p>
+            <p className="text-sm text-content-tertiary max-w-sm mb-5">
+              {t('records_empty_guide')}
+            </p>
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2 rounded-btn border border-strong text-content-secondary hover:bg-surface-2 text-sm font-medium cursor-pointer transition-colors"
+            >
+              {t('tasks_go_chat')}
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-2.5">
+            {runs.map((run) => {
+              const owner = multiAgent && run.agent_id ? findAgent(run.agent_id) : null
+              const duration = formatDuration(run.started_at, run.ended_at)
+              const trigger =
+                run.trigger === 'manual'
+                  ? t('records_trigger_manual')
+                  : t('records_trigger_scheduled')
+              return (
+                <div
+                  key={run.run_id}
+                  onClick={() => setDetailRun(run)}
+                  className="rounded-card border border-default bg-surface p-4 cursor-pointer hover:border-strong transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <RunStatusBadge status={run.status} />
+                    <span className="font-medium text-sm text-content truncate">
+                      {run.task_name || run.task_id || t('records_col_task')}
+                    </span>
+                    {owner && (
+                      <span
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-inset-2 text-content-secondary flex-shrink-0"
+                        title={owner.name || owner.id}
+                      >
+                        <AgentAvatar agent={owner} size={14} />
+                        <span className="text-[11px] max-w-[80px] truncate">
+                          {owner.name || owner.id}
+                        </span>
+                      </span>
+                    )}
+                    <div className="flex-1" />
+                    <span className="text-[11px] px-1.5 py-0.5 rounded-full bg-inset text-content-tertiary flex-shrink-0">
+                      {trigger}
+                    </span>
+                  </div>
+
+                  {run.status === 'error' && run.error ? (
+                    <p className="text-xs text-danger mb-2 line-clamp-2 break-words">
+                      {run.error}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-content-secondary mb-2 line-clamp-2 break-words">
+                      {run.output_preview || (
+                        <span className="text-content-tertiary italic">
+                          {t('records_no_output')}
+                        </span>
+                      )}
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2 text-xs text-content-tertiary">
+                    <Clock size={12} />
+                    <span>{formatRunTime(run.started_at)}</span>
+                    {duration && (
+                      <>
+                        <span className="text-content-tertiary/50">·</span>
+                        <span>
+                          {t('records_duration')} {duration}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {detailRun && (
+        <RunDetailModal run={detailRun} onClose={() => setDetailRun(null)} />
+      )}
+    </div>
+  )
+}
+
+// The history detail dialog. Opens with the list row's data shown immediately,
+// then fetches the full delivered body (recovered from the receiver's session)
+// and swaps it in. Read-only.
+const RunDetailModal: React.FC<{ run: SchedulerRun; onClose: () => void }> = ({
+  run,
+  onClose,
+}) => {
+  const [detail, setDetail] = useState<SchedulerRunDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [instances, setInstances] = useState<SchedulerInstance[]>([])
+  const multiAgent = useAgentStore(selectMultiAgent)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      // Detail (full body) and the instance directory (to name the channel) in
+      // parallel; the directory is best-effort and never blocks the body.
+      const [d, insts] = await Promise.all([
+        apiClient.getSchedulerRunDetail(run.run_id).catch(() => null),
+        apiClient.getSchedulerInstances().catch(() => []),
+      ])
+      if (cancelled) return
+      setDetail(d)
+      setInstances(insts)
+      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [run.run_id])
+
+  const trigger =
+    run.trigger === 'manual' ? t('records_trigger_manual') : t('records_trigger_scheduled')
+  const duration = formatDuration(run.started_at, run.ended_at)
+  // Prefer the full body from the session; fall back to the list preview.
+  const body = detail?.full_output || run.output_preview || ''
+
+  // Channel type / friendly instance name / owning Agent for the meta grid.
+  // Web tasks come from a chat session, not a bound IM instance, so present them
+  // as the desktop client rather than the bare "web" type / empty name.
+  const rawChannelType = run.channel_type || detail?.channel_type || ''
+  const instanceId = run.instance_id || detail?.instance_id || ''
+  const instance = instances.find((i) => i.instance_id === instanceId) || null
+  const isWebTask = rawChannelType === 'web' || (!rawChannelType && !instanceId)
+  const channelType = isWebTask ? t('record_channel_web_type') : rawChannelType
+  const channelName = isWebTask
+    ? t('record_channel_web_name')
+    : instance?.name || instanceId || ''
+  const owner = run.agent_id ? findAgent(run.agent_id) : null
+
+  return (
+    <Modal
+      open
+      size="lg"
+      title={run.task_name || run.task_id || t('record_detail_title')}
+      onClose={onClose}
+      footer={
+        <Btn variant="ghost" onClick={onClose}>
+          {t('record_detail_close')}
+        </Btn>
+      }
+    >
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+        <div>
+          <div className="text-xs text-content-tertiary mb-0.5">{t('record_detail_status')}</div>
+          <RunStatusBadge status={run.status} />
+        </div>
+        <div>
+          <div className="text-xs text-content-tertiary mb-0.5">{t('record_detail_trigger')}</div>
+          <span className="text-content">{trigger}</span>
+        </div>
+        <div>
+          <div className="text-xs text-content-tertiary mb-0.5">{t('record_detail_started')}</div>
+          <span className="text-content">{formatRunTime(run.started_at)}</span>
+        </div>
+        {duration && (
+          <div>
+            <div className="text-xs text-content-tertiary mb-0.5">
+              {t('record_detail_duration')}
+            </div>
+            <span className="text-content">{duration}</span>
+          </div>
+        )}
+        {channelType && (
+          <div>
+            <div className="text-xs text-content-tertiary mb-0.5">
+              {t('record_detail_channel_type')}
+            </div>
+            <span className="text-content">{channelType}</span>
+          </div>
+        )}
+        {channelName && (
+          <div>
+            <div className="text-xs text-content-tertiary mb-0.5">
+              {t('record_detail_channel_name')}
+            </div>
+            <span className="text-content break-all">{channelName}</span>
+          </div>
+        )}
+        {multiAgent && owner && (
+          <div>
+            <div className="text-xs text-content-tertiary mb-0.5">
+              {t('record_detail_agent')}
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-content">
+              <AgentAvatar agent={owner} size={16} />
+              <span className="truncate max-w-[140px]">{owner.name || owner.id}</span>
+            </span>
+          </div>
+        )}
+      </div>
+
+      {run.status === 'error' && run.error && (
+        <div className="mt-4">
+          <div className="text-xs text-content-tertiary mb-1">{t('record_detail_error')}</div>
+          <div className="rounded-btn border border-danger-border bg-danger-soft px-3 py-2 text-sm text-danger break-words whitespace-pre-wrap">
+            {run.error}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4">
+        <div className="text-xs text-content-tertiary mb-1">{t('record_detail_output')}</div>
+        {loading ? (
+          <div className="flex items-center gap-2 text-content-tertiary text-sm py-4">
+            <Loader2 size={14} className="animate-spin" />
+            {t('record_detail_loading')}
+          </div>
+        ) : body ? (
+          <div className="rounded-btn border border-default bg-inset px-3 py-2 text-sm text-content whitespace-pre-wrap break-words max-h-80 overflow-y-auto">
+            {body}
+          </div>
+        ) : (
+          <p className="text-sm text-content-tertiary italic py-2">{t('records_no_output')}</p>
+        )}
+      </div>
+    </Modal>
   )
 }
 

@@ -10,6 +10,8 @@ import type {
   MemoryPage,
   MemoryDoc,
   SchedulerTask,
+  SchedulerRun,
+  SchedulerRunDetail,
   TaskSchedule,
   TaskAction,
   SchedulerInstance,
@@ -936,6 +938,45 @@ class ApiClient {
     const path = this.activeAgentId ? '/api/scheduler?agent_id=' : '/api/scheduler'
     const data = await this.request<{ status: string; tasks: SchedulerTask[] }>(path)
     return data.tasks
+  }
+
+  // Execution history for scheduled tasks, newest first. In multi-Agent mode we
+  // send an explicit empty agent_id so the backend returns the whole team's
+  // history (mirroring the task list); single-Agent mode omits the param.
+  // Pass a taskId to narrow to one task's runs.
+  async getSchedulerRuns(taskId = '', limit = 100): Promise<SchedulerRun[]> {
+    const qs = new URLSearchParams()
+    if (this.activeAgentId) qs.set('agent_id', '')
+    if (taskId) qs.set('task_id', taskId)
+    if (limit) qs.set('limit', String(limit))
+    const query = qs.toString()
+    const path = query ? `/api/scheduler/runs?${query}` : '/api/scheduler/runs'
+    const data = await this.request<{ status: string; runs: SchedulerRun[] }>(path)
+    return data.runs || []
+  }
+
+  // Runs across ALL Agents that started after `since` (epoch seconds). Powers
+  // the cross-session scheduler notification poll: a scheduled task can fire
+  // into a session (any Agent) the user isn't viewing, so this is deliberately
+  // NOT scoped to the active Agent — the notifier decides what to surface.
+  async getSchedulerRunsSince(since: number, limit = 20): Promise<SchedulerRun[]> {
+    const qs = new URLSearchParams()
+    qs.set('since', String(Math.floor(since)))
+    if (limit) qs.set('limit', String(limit))
+    const data = await this.request<{ status: string; runs: SchedulerRun[] }>(
+      `/api/scheduler/runs?${qs.toString()}`
+    )
+    return data.runs || []
+  }
+
+  // Full detail for one run: the complete delivered body recovered from the
+  // receiver's session, or null (fall back to preview). Opened on demand when a
+  // history record is clicked, so the list stays a light index.
+  async getSchedulerRunDetail(runId: string): Promise<SchedulerRunDetail | null> {
+    const data = await this.request<{ status: string; run?: SchedulerRunDetail }>(
+      `/api/scheduler/runs/detail?run_id=${encodeURIComponent(runId)}`
+    )
+    return data.run || null
   }
 
   // Task mutations route to the owning Agent's store via its agent_id. Passing

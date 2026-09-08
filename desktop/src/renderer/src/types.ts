@@ -59,7 +59,7 @@ export interface ElectronAPI {
   setAppTitle?: (title: string) => Promise<boolean>
   // Show a native OS notification; clicking it focuses the window and fires
   // onOpenSession with the session id.
-  notify?: (payload: { title?: string; body?: string; sessionId?: string; silent?: boolean }) => Promise<boolean>
+  notify?: (payload: { title?: string; body?: string; sessionId?: string; silent?: boolean; force?: boolean }) => Promise<boolean>
   onOpenSession?: (callback: (sessionId: string) => void) => () => void
   platform: string
   // OS UI language (e.g. "zh-CN"); used to default the language on first run.
@@ -941,6 +941,42 @@ export interface SchedulerTask {
   // For an IM task this is the *effective* owner the backend derives from the
   // delivery instance's current binding, so it stays honest after a re-bind.
   agent_id?: string
+}
+
+// One recorded execution of a scheduled task, read from the global runs ledger
+// (task_source='scheduler'). Mirrors GET /api/scheduler/runs.
+export interface SchedulerRun {
+  run_id: string
+  // The Agent that ran it. Present in multi-Agent installs; '' is the default.
+  agent_id?: string
+  session_id: string
+  task_id: string
+  // 'running' | 'done' | 'error'. Open runs (still executing) show 'running'.
+  status: string
+  // Unix seconds. ended_at is null while a run is still in flight.
+  started_at: number
+  ended_at?: number | null
+  error?: string
+  // Snapshot fields lifted from the run's extras index at record time, so
+  // history stays readable even after the task is renamed or deleted.
+  task_name?: string
+  action_type?: string
+  channel_type?: string
+  // The delivery channel instance that ran it; resolved to a friendly name
+  // client-side against the instance directory.
+  instance_id?: string
+  // How the tick fired: 'scheduled' (timer) or 'manual' (run-now).
+  trigger?: string
+  // Short, length-capped peek at what was delivered.
+  output_preview?: string
+}
+
+// One run plus the full delivered body, for the history detail dialog. Mirrors
+// GET /api/scheduler/runs/detail. full_output is the complete message recovered
+// from the receiver's session; null when it was pruned or never injected, in
+// which case the UI falls back to output_preview.
+export interface SchedulerRunDetail extends SchedulerRun {
+  full_output?: string | null
 }
 
 // A channel instance the console can deliver a scheduled task through. The
