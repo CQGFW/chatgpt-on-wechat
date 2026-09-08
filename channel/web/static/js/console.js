@@ -228,7 +228,8 @@ const I18N = {
         steer_active: '引导当前任务',
         slash_logs: '查看最近日志',
         slash_version: '查看版本',
-        input_placeholder: '输入消息，/ 使用指令，@ 引用智能体或文件',
+        input_placeholder: '输入消息，/ 使用指令，@ 引用文件',
+        input_placeholder_team: '输入消息，/ 使用指令，@ 引用智能体或文件',
         config_title: '配置管理', config_desc: '管理模型和 Agent 配置',
         config_model: '模型配置', config_agent: 'Agent 配置',
         config_language: '语言', config_language_hint: '界面展示、命令文案、系统提示词等使用的语言（与右上角切换同步）',
@@ -725,7 +726,8 @@ const I18N = {
         steer_active: '引導當前任務',
         slash_logs: '檢視最近日誌',
         slash_version: '檢視版本',
-        input_placeholder: '輸入訊息，/ 使用指令，@ 引用智慧體或檔案',
+        input_placeholder: '輸入訊息，/ 使用指令，@ 引用檔案',
+        input_placeholder_team: '輸入訊息，/ 使用指令，@ 引用智慧體或檔案',
         config_title: '設定管理', config_desc: '管理模型和 Agent 設定',
         config_model: '模型設定', config_agent: 'Agent 設定',
         config_language: '語言', config_language_hint: '介面展示、命令文案、系統提示詞等使用的語言（與右上角切換同步）',
@@ -1217,7 +1219,8 @@ const I18N = {
         steer_active: 'Steer active task',
         slash_logs: 'Show recent logs',
         slash_version: 'Show version',
-        input_placeholder: 'Type a message, / for commands, @ to mention an Agent or a file',
+        input_placeholder: 'Type a message, / for commands, @ to reference a file',
+        input_placeholder_team: 'Type a message, / for commands, @ to mention an Agent or a file',
         config_title: 'Configuration', config_desc: 'Manage model and agent settings',
         config_model: 'Model Configuration', config_agent: 'Agent Configuration',
         config_language: 'Language', config_language_hint: 'Language for the UI, command text, system prompts and more (synced with the top-right switch)',
@@ -1700,6 +1703,14 @@ function rerenderDynamicViews() {
     // Reload config after language switch
     if (currentView === 'config') {
         loadConfigView();
+    }
+    // Repaint the Agents workbench after a language switch. The grid, detail
+    // pane and avatar picker are built from t() into innerHTML, so applyI18n()
+    // (which only touches data-i18n nodes) can't relocalize them; re-render from
+    // the in-memory catalog instead of refetching.
+    if (currentView === 'agents') {
+        renderAgentsGrid();
+        if (selectedAdminAgentId) renderAgentDetail();
     }
 }
 
@@ -2782,7 +2793,7 @@ function renderAgentsGrid() {
                 <div class="min-w-0 flex-1">
                     <div class="agent-card-name truncate">${escapeHtml(agent.name)}</div>
                     <div class="agent-card-desc">${desc ? escapeHtml(desc) : `<span class="agent-card-desc-empty">${escapeHtml(t('agents_no_desc'))}</span>`}</div>
-                </div>
+            </div>
             </div>
         </div>`;
     }).join('');
@@ -3921,8 +3932,9 @@ function setTeamMembers(ids) {
             _sessCfg = { model: data.model, permission: data.permission, team: data.team };
             renderComposerIdentity();
             // Inviting or removing someone changes whether one model can speak
-            // for this conversation.
+            // for this conversation, and whether @ can address an Agent.
             _renderModelChip();
+            _renderInputPlaceholder();
         }
     });
 }
@@ -4364,8 +4376,8 @@ window.fetch = function(input, init) {
     let url = typeof input === 'string' ? input : input.url;
     if (activeAgentId && typeof url === 'string' && url.startsWith('/')) {
         if (!/[?&]agent_id=/.test(url)) {
-            const joiner = url.includes('?') ? '&' : '?';
-            url = `${url}${joiner}agent_id=${encodeURIComponent(activeAgentId)}`;
+        const joiner = url.includes('?') ? '&' : '?';
+        url = `${url}${joiner}agent_id=${encodeURIComponent(activeAgentId)}`;
         }
         if (typeof input !== 'string') input = new Request(url, input);
         else input = url;
@@ -5582,6 +5594,7 @@ async function refreshSessionSettings() {
     }
     _renderPermissionChip();
     _renderModelChip();
+    _renderInputPlaceholder();
     renderComposerIdentity();
 }
 
@@ -5607,6 +5620,15 @@ function _renderPermissionChip() {
     btn.setAttribute('data-tooltip', tip);
     btn.setAttribute('data-tooltip-pos', 'top');
     btn.setAttribute('data-tip-float', '');
+}
+
+// The composer placeholder only advertises "@ an Agent" when the conversation
+// actually has other members to address. A solo chat can only @ files, so it
+// falls back to the file-only hint. Runs whenever the session's team changes.
+function _renderInputPlaceholder() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    input.placeholder = t(sharedConversation() ? 'input_placeholder_team' : 'input_placeholder');
 }
 
 function _renderModelChip() {
@@ -7246,12 +7268,12 @@ function startPolling() {
                     // dedupes by run id. Notifying here too would double-pop, so
                     // only notify for an ordinary missed reply.
                     if (!isSchedulerRequest(rid)) {
-                        showTaskNotification(
-                            sessionTitleOf(sessionId) || 'CowAgent',
-                            firstLineSnippet(data.content),
+                    showTaskNotification(
+                        sessionTitleOf(sessionId) || 'CowAgent',
+                        firstLineSnippet(data.content),
                             sessionId,
                             activeAgentId
-                        );
+                    );
                     }
                 }
             }
@@ -8408,6 +8430,9 @@ function _applyInputTooltips() {
     // are repainted here too (this runs on every language switch).
     _renderPermissionChip();
     _renderModelChip();
+    // applyI18n resets the placeholder to the solo hint via data-i18n-placeholder,
+    // so re-apply the team-aware variant for group conversations.
+    _renderInputPlaceholder();
 }
 
 // A session that exists in the browser but not yet in the database: the user
@@ -11107,7 +11132,7 @@ function openSearchKeyModal(providerId, providerMeta) {
     const existing = document.getElementById('search-key-modal');
     if (existing) existing.remove();
 
-    const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
+        const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
     const prov = (searchCap.providers || []).find(p => p.id === providerId);
     const isSearxng = providerId === 'searxng';
     // SearXNG holds an instance URL (echoed back verbatim in url_masked); the
@@ -11241,27 +11266,27 @@ function _saveSearchKey(providerId) {
     if (providerId === 'searxng') {
         // SearXNG uses an instance URL, not an API key. Empty input is a no-op
         // here (use the clear button to remove it).
-        if (!apiKey) {
-            input.focus();
-            return;
-        }
-        fetch('/api/models', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+    if (!apiKey) {
+        input.focus();
+        return;
+    }
+    fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 action: 'set_search_credential',
                 provider: providerId,
                 url: apiKey, // reuse the input value as the URL
             }),
-        }).then(r => r.json()).then(data => {
-            if (data.status === 'success') {
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'success') {
                 const modal = document.getElementById('search-key-modal');
-                if (modal) modal.remove();
-                loadModelsView({ preserveScroll: true });
-            }
-        });
+            if (modal) modal.remove();
+            loadModelsView({ preserveScroll: true });
+        }
+    });
         return;
-    }
+}
 
     if (!apiKey) {
         input.focus();
@@ -12941,8 +12966,8 @@ function disconnectChannel(chName, instanceId) {
                     if (instanceId) {
                         loadChannelsView();
                     } else {
-                        if (ch) ch.active = false;
-                        renderActiveChannels();
+                    if (ch) ch.active = false;
+                    renderActiveChannels();
                     }
                 } else {
                     // Surface the failure instead of silently leaving the card in
@@ -13824,21 +13849,21 @@ function switchTasksTab(tab) {
 function refreshTasksView() {
     const btn = document.getElementById('task-refresh-btn');
     const icon = btn.querySelector('i');
-
+    
     // Add spin animation
     icon.classList.add('fa-spin');
     btn.disabled = true;
-
+    
     if (tasksActiveTab === 'records') {
         runsLoaded = false;
         loadRunsView();
     } else {
-        tasksLoaded = false;
-        const listEl = document.getElementById('tasks-list');
-        listEl.innerHTML = '';
-        loadTasksView();
+    tasksLoaded = false;
+    const listEl = document.getElementById('tasks-list');
+    listEl.innerHTML = '';
+    loadTasksView();
     }
-
+    
     // Restore button after animation ends
     setTimeout(() => {
         icon.classList.remove('fa-spin');
@@ -16108,13 +16133,13 @@ function saveTaskEdit() {
         is_group: false,
         notify_session_id: ''
     };
-
+    
     if (actionType === 'send_message') {
         action.content = content;
     } else {
         action.task_description = content;
     }
-
+    
     if (wasWeb) {
         // Web target isn't switchable: keep the original session receiver/channel.
         action.channel_type = origAction.channel_type || 'web';
