@@ -3,7 +3,7 @@ title: web_search - Web 検索
 description: インターネットからリアルタイム情報を検索。複数の検索プロバイダーに対応
 ---
 
-インターネットからリアルタイム情報、ニュース、リサーチなどを検索します。Bocha、百度 Qianfan、智谱（Zhipu）、LinkAI、AnySearch、Serply の 6 つのバックエンドに対応しており、いずれか 1 社を設定すれば利用可能です。
+インターネットからリアルタイム情報、ニュース、リサーチなどを検索します。Bocha、百度 Qianfan、智谱（Zhipu）、LinkAI、AnySearch、Serply、Tavily、SearXNG の 8 つのバックエンドに対応しており、いずれか 1 社を設定すれば利用可能です。
 
 <Tip>
   [Web コンソール](/ja/channels/web) の「モデル管理 → 検索」パネルから、プロバイダーと戦略を可視化して設定するのが推奨です。設定ファイルを手動で編集する必要はありません。
@@ -19,8 +19,10 @@ description: インターネットからリアルタイム情報を検索。複�
 | LinkAI | `linkai_api_key` を再利用 | [LinkAI コンソール](https://link-ai.tech/console/interface) |
 | AnySearch | オプション設定 `tools.web_search.anysearch_api_key`（匿名モード対応） | [AnySearch Open Platform](https://anysearch.com/) |
 | Serply | `tools.web_search.serply_api_key` | [Serply](https://serply.io)（[ドキュメント](https://serply.io/docs)） |
+| Tavily | `tools.web_search.tavily_api_key` | [Tavily](https://tavily.com) |
+| SearXNG | `tools.web_search.searxng_url`（セルフホスト型インスタンス URL、API Key 不要） | [SearXNG](https://docs.searxng.org/) |
 
-Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearch_api_key / serply_api_key）を別途設定する必要がありますが、その他の3社は対応するモデルのAPIキーをそのまま流用でき、モデルを設定すれば同時に検索機能も利用可能になります。
+Bocha、AnySearch、Serply、Tavilyについては専用キーを別途設定する必要がありますが、その他の3社は対応するモデルのAPIキーをそのまま流用でき、モデルを設定すれば同時に検索機能も利用可能になります。SearXNGはセルフホスト型で、インスタンスURLのみ設定が必要です。
 
 ## ルーティング戦略
 
@@ -35,7 +37,7 @@ Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearc
 }
 ```
 
-- `auto`（デフォルト）：Agent が設定済みのプロバイダーから自動的に選択し、1 回のタスク内で複数回呼び出し、異なるプロバイダーを切り替えてより包括的な結果を取得できます。未指定の場合は `bocha → qianfan → zhipu → linkai → anysearch → serply` の順でフォールバックします。
+- `auto`（デフォルト）：Agent が設定済みのプロバイダーから自動的に選択し、1 回のタスク内で複数回呼び出し、異なるプロバイダーを切り替えてより包括的な結果を取得できます。未指定の場合は `bocha → qianfan → zhipu → linkai → anysearch → serply → tavily → searxng` の順でフォールバックします。
 
 - `fixed`：`provider` で指定したプロバイダーに固定。該当プロバイダーの認証情報が欠けている場合は自動的に auto の順序にフォールバックします。
 
@@ -50,5 +52,6 @@ Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearc
 | `provider` | string | いいえ | `auto` 戦略で複数プロバイダーを設定している場合に表示。単回のプロバイダー切り替えに使用 |
 
 <Note>
-  6 社の認証情報がいずれも未設定の場合、このツールは Agent に登録されません。
+  8 社の認証情報がいずれも未設定の場合、このツールは Agent に登録されません。
 </Note>
+
