@@ -2823,7 +2823,7 @@ class ConfigHandler:
             "models": [const.DOUBAO_SEED_2_1_PRO, const.DOUBAO_SEED_2_1_TURBO, const.DOUBAO_SEED_2_PRO, const.DOUBAO_SEED_2_CODE],
         }),
         ("qianfan", {
-            "label": {"zh": "百度千帆", "en": "ERNIE"},
+            "label": {"zh": "百度", "en": "ERNIE"},
             "api_key_field": "qianfan_api_key",
             "api_base_key": "qianfan_api_base",
             "api_base_default": "https://qianfan.baidubce.com/v2",
@@ -4233,7 +4233,7 @@ class ModelsHandler:
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
         "zhipu":   {"zh": "智谱", "en": "GLM"},
-        "qianfan": {"zh": "百度千帆", "en": "ERNIE"},
+        "qianfan": {"zh": "百度", "en": "ERNIE"},
         "linkai":  {"zh": "LinkAI", "en": "LinkAI"},
         "anysearch": {"zh": "AnySearch", "en": "AnySearch"},
         "serply":  {"zh": "Serply", "en": "Serply"},
