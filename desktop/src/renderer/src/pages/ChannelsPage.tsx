@@ -27,6 +27,7 @@ import QrScanPanel from '../components/QrScanPanel'
 import { PaperPlaneIcon } from '../components/icons'
 import ChannelTeamSelect from '../components/ChannelTeamSelect'
 import { useAgentStore } from '../store/agentStore'
+import { askConfirm } from '../store/confirmStore'
 
 // Channels that connect via QR scanning rather than credential fields.
 const QR_PROVIDERS: Record<string, 'weixin' | 'feishu'> = { weixin: 'weixin', feishu: 'feishu' }
@@ -594,6 +595,16 @@ const ChannelCard: React.FC<{
   }
 
   const run = async (action: 'save' | 'connect' | 'disconnect') => {
+    // Disconnect throws away a live channel, so confirm first — matching the web
+    // console, which has always asked before disconnecting.
+    if (action === 'disconnect') {
+      const ok = await askConfirm({
+        titleKey: 'channels_disconnect',
+        msgKey: 'channels_disconnect_confirm',
+        okKey: 'channels_disconnect',
+      })
+      if (!ok) return
+    }
     setBusy(true)
     setStatus('')
     try {
