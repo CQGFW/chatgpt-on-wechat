@@ -157,6 +157,9 @@ const I18N = {
         models_search_anysearch_desc: '前往 anysearch.com 控制台创建 API Key。',
         models_search_serply_title: '配置 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台创建 API Key。',
+        models_search_anysearch_anon_hint: '留空可启用匿名模式（无需 API Key）',
+        models_search_anonymous_badge: '匿名',
+        models_search_anonymous_disable: '停用匿名',
         models_search_edit_hint: '点击修改配置',
         models_unavailable: '不可用',
         models_set_via_env: '通过环境变量启用',
@@ -639,6 +642,9 @@ const I18N = {
         models_search_anysearch_desc: '前往 anysearch.com 控制台建立 API Key',
         models_search_serply_title: '設定 Serply API Key',
         models_search_serply_desc: '前往 serply.io 控制台建立 API Key',
+        models_search_anysearch_anon_hint: '留空可啟用匿名模式（無需 API Key）',
+        models_search_anonymous_badge: '匿名',
+        models_search_anonymous_disable: '停用匿名',
         models_search_edit_hint: '點選修改設定',
         models_unavailable: '不可用',
         models_set_via_env: '透過環境變數啟用',
@@ -1116,6 +1122,9 @@ const I18N = {
         models_search_anysearch_desc: 'Create a key at the AnySearch console (anysearch.com).',
         models_search_serply_title: 'Configure Serply API Key',
         models_search_serply_desc: 'Create a key at the Serply console (serply.io).',
+        models_search_anysearch_anon_hint: 'Leave empty to enable anonymous mode (no API key required)',
+        models_search_anonymous_badge: 'anonymous',
+        models_search_anonymous_disable: 'Disable anonymous',
         models_search_edit_hint: 'Click to edit',
         models_unavailable: 'unavailable',
         models_set_via_env: 'enable via environment variable',
@@ -10833,6 +10842,7 @@ function _renderSearchSummary(body, cap) {
     if (!host) return;
     const providers = cap.providers || [];
     const configured = providers.filter(p => p.configured);
+
     const missing = providers.filter(p => !p.configured);
 
     const addBtn = missing.length
@@ -10859,7 +10869,7 @@ function _renderSearchSummary(body, cap) {
                     class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-md cursor-pointer
                            bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400
                            hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors">
-                <i class="fas fa-check text-[10px]"></i>${escapeHtml(localizedLabel(p.label))}
+                <i class="fas fa-check text-[10px]"></i>${escapeHtml(localizedLabel(p.label))}${p.anonymous ? ` · ${t('models_search_anonymous_badge')}` : ''}
             </button>
         `).join('');
         host.innerHTML = `
@@ -10947,10 +10957,12 @@ function _launchSearchProviderConfig(providerId, providerMeta) {
     }
 }
 
+
 function saveSearchCapability() {
     const strategyDd = document.getElementById('cap-search-strategy');
     const providerDd = document.getElementById('cap-search-provider');
-    const strategy = strategyDd ? getDropdownValue(strategyDd) : 'auto';
+    // 如果策略下拉框的值是空（待配置），默认使用 'auto'
+    const strategy = strategyDd ? (getDropdownValue(strategyDd) || 'auto') : 'auto';
     const provider = (strategy === 'fixed' && providerDd) ? getDropdownValue(providerDd) : '';
 
     fetch('/api/models', {
@@ -10967,34 +10979,43 @@ function saveSearchCapability() {
             showStatus('cap-search-status', 'models_save_success', false);
             setTimeout(() => loadModelsView({ preserveScroll: true }), 400);
         } else {
+            console.log('[saveSearchCapability] Error:', data.message);
             showStatus('cap-search-status', 'models_save_failed', true);
         }
     }).catch(() => showStatus('cap-search-status', 'models_save_failed', true));
 }
+
 
 // Minimal bocha API-key modal. Reuses the existing vendor-modal markup
 // helpers would be nice, but bocha isn't in PROVIDER_MODELS (it's not a
 // model vendor), so we render a tiny dedicated dialog.
 // For search vendors that hold their own keys.
 
+
 function openSearchKeyModal(providerId, providerMeta) {
     const existing = document.getElementById('search-key-modal');
     if (existing) existing.remove();
 
+    const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
+    const prov = (searchCap.providers || []).find(p => p.id === providerId);
     let masked = (providerMeta && providerMeta.api_key_masked) || '';
-    if (!masked) {
-        const searchCap = (modelsState && modelsState.capabilities && modelsState.capabilities.search) || {};
-        const bocha = (searchCap.providers || []).find(p => p.id === providerId);
-        if (bocha && bocha.api_key_masked) masked = bocha.api_key_masked;
-    }
+    if (!masked && prov && prov.api_key_masked) masked = prov.api_key_masked;
     const hasKey = !!masked;
-    const clearBtnHtml = hasKey
+    const isAnonymous = providerId === 'anysearch' && !!((providerMeta && providerMeta.anonymous) || (prov && prov.anonymous));
+    const clearBtnHtml = (hasKey || isAnonymous)
         ? `<button type="button" id="search-key-clear"
                   class="px-3 py-1.5 rounded-md text-xs text-red-500 dark:text-red-400
                          hover:bg-red-50 dark:hover:bg-red-900/20 cursor-pointer transition-colors">
               ${t('models_clear_credential')}
            </button>`
         : '';
+    let descText = t('models_search_' + providerId + '_desc');
+    if (providerId === 'anysearch') {
+        const hint = currentLang === 'zh'
+            ? '（留空可启用匿名模式，每日有免费额度）'
+            : '(Leave blank to enable anonymous mode with daily free quota)';
+        descText = descText + ' ' + hint;
+    }
 
     const modal = document.createElement('div');
     modal.id = 'search-key-modal';
@@ -11004,7 +11025,7 @@ function openSearchKeyModal(providerId, providerMeta) {
              class="bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10
                     w-full max-w-md mx-4 p-6 shadow-xl">
             <h3 class="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-1">${t('models_search_' + providerId + '_title')}</h3>
-            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">${t('models_search_' + providerId + '_desc')}</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">${descText}</p>
             <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-1.5">API Key</label>
             <input id="search-key-input" type="text" autocomplete="off" data-1p-ignore data-lpignore="true"
                    class="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600
@@ -11065,16 +11086,37 @@ function openSearchKeyModal(providerId, providerMeta) {
     document.addEventListener('keydown', onKey);
 }
 
+
 function _saveSearchKey(providerId) {
     const input = document.getElementById('search-key-input');
     if (!input) return;
-    // Untouched masked value => no change requested; close silently.
     if (input.dataset.masked === '1') {
         const modal = document.getElementById('search-key-modal');
         if (modal) modal.remove();
         return;
     }
     const apiKey = input.value.trim();
+
+    if (providerId === 'anysearch') {
+    fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            action: 'set_search_credential',
+            provider: providerId,
+            api_key: apiKey,
+            anonymous: !apiKey, // ← 字段名必须是 anonymous；留空保存 = 启用匿名（表第 2 行）
+        }),
+    }).then(r => r.json()).then(data => {
+        if (data.status === 'success') {
+            const modal = document.getElementById('search-key-modal');
+            if (modal) modal.remove();
+            loadModelsView({ preserveScroll: true });
+        }
+    });
+    return;
+}
+
     if (!apiKey) {
         input.focus();
         return;
