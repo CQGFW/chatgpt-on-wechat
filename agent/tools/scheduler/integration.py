@@ -279,13 +279,13 @@ def init_scheduler(agent_bridge, workspace_root: str = None, agent_id: str = Non
             # (e.g. channel not ready just after start). The Agent identity is
             # taken from the task itself (not a closure), so one service runs
             # tasks belonging to any Agent under the right workspace/memory/tools.
-            def execute_task_callback(task: dict):
+            def execute_task_callback(task: dict, trigger: str = "scheduled"):
                 from common.runtime_identity import identity_scope
 
                 agent_id = _resolve_task_agent_id(agent_bridge, task)
                 try:
                     with identity_scope(agent_id=agent_id):
-                        return _run_scheduled_task(task, agent_bridge, agent_id)
+                        return _run_scheduled_task(task, agent_bridge, agent_id, trigger=trigger)
                 except Exception as e:
                     logger.error(f"[Scheduler] Error executing task {task.get('id')}: {e}")
                     return False
