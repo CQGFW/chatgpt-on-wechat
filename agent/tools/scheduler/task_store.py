@@ -21,6 +21,27 @@ def _lock_for_path(store_path: str):
         return _store_locks.setdefault(normalized_path, threading.RLock())
 
 
+class _DescStr:
+    """Sort a string descending inside an otherwise-ascending sort key tuple.
+
+    Lets ``sort_key`` mix an ascending rank (enabled-first) with a descending
+    field (newest ``created_at`` on top) in one ``sort`` call, without a second
+    pass or reversing the whole list.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str):
+        self.value = value or ""
+
+    def __lt__(self, other: "_DescStr") -> bool:
+        # Reversed comparison => larger (later) strings sort first.
+        return self.value > other.value
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, _DescStr) and self.value == other.value
+
+
 class TaskStore:
     """
     Manages persistent storage of scheduled tasks
@@ -213,16 +234,20 @@ class TaskStore:
                 if (effective_task_agent_id(t) or default_id) == agent_id
             ]
         
-        # Sort by enabled status (enabled first), then by next_run_at
+        # Enabled tasks first, then newest-created on top (a task the user just
+        # created should sit at the head of the list rather than wherever its
+        # next_run_at happens to fall). created_at is an ISO string so a plain
+        # string compare orders it chronologically; a legacy task missing it
+        # sorts last within its group.
         def sort_key(t):
             enabled = t.get("enabled", True)
-            next_run = t.get("next_run_at", "")
-            # Enabled tasks first (0), disabled tasks second (1)
-            # Then sort by next_run_at (empty string sorts last)
-            return (0 if enabled else 1, next_run if next_run else "9999-12-31")
-        
+            created = t.get("created_at") or ""
+            # Negate the created_at ordering for descending: pair the enabled
+            # rank (ascending) with the created string reversed via a wrapper.
+            return (0 if enabled else 1, _DescStr(created))
+
         task_list.sort(key=sort_key)
-        
+
         return task_list
     
     def enable_task(self, task_id: str, enabled: bool = True) -> bool:

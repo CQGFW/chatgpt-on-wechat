@@ -92,7 +92,7 @@ def test_run_extras_capture_trigger_and_output_preview(monkeypatch, one_agent):
 def test_output_preview_is_truncated(monkeypatch, one_agent):
     from agent.tools.scheduler import integration
 
-    long_body = "x" * 500
+    long_body = "x" * (integration._OUTPUT_PREVIEW_LIMIT + 200)
 
     def _deliver(task, agent_bridge, agent_id=None, output_sink=None):
         if output_sink is not None:

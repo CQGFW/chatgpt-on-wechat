@@ -498,11 +498,13 @@ def _is_channel_ready(
             return True
 
         if channel_type == "web":
-            if hasattr(channel, "has_session_queue"):
-                return channel.has_session_queue(receiver, agent_id)
-            queues = getattr(channel, "session_queues", None)
-            if not queues or receiver not in queues:
-                return False
+            # A web session is always a valid delivery target: the message is
+            # persisted to the conversation history regardless, and an idle
+            # client keeps polling /poll so it will surface the push on its next
+            # tick. Gating on the in-memory session_queues (which only exists
+            # after the user has sent a message this process life) used to make
+            # a scheduled push silently defer forever after a restart, even
+            # though the session and the polling client were both still there.
             return True
 
         return True
@@ -591,16 +593,23 @@ def _remember_delivered_output(
         - agent_task / tool_call / skill_call: gated by ``scheduler_inject_to_session``
           (default True). These produce AI-generated content worth remembering.
         - send_message: additionally gated by ``scheduler_inject_send_message``
-          (default False). Fixed reminder text rarely benefits follow-up Q&A and
-          would just consume context tokens.
+          (default False) on push-capable IM channels. Fixed reminder text rarely
+          benefits follow-up Q&A there and would just consume context tokens.
+
+    The web channel is the exception: it cannot push to an idle client, so the
+    conversation history is the *only* place a delivered message shows up when
+    the user isn't actively chatting (e.g. right after a restart). We therefore
+    always persist for web, including send_message, so nothing is silently lost.
     """
     if not content:
         return
     action = task.get("action", {})
     action_type = action.get("type", "")
 
-    # send_message defaults to NOT being injected; explicit opt-in via config.
-    if action_type == "send_message":
+    # send_message defaults to NOT being injected on IM channels; explicit
+    # opt-in via config. Web always persists (see docstring) since history is
+    # its only delivery surface for an idle client.
+    if action_type == "send_message" and channel_type != "web":
         if not conf().get("scheduler_inject_send_message", False):
             return
 
@@ -627,7 +636,7 @@ def _remember_delivered_output(
 # Longest delivered-content snippet stored on a scheduler run for at-a-glance
 # history ("what did this task actually send?"). Kept short so the runs sidecar
 # stays a light index, not a second copy of the message body.
-_OUTPUT_PREVIEW_LIMIT = 200
+_OUTPUT_PREVIEW_LIMIT = 500
 
 
 def _record_scheduler_run(task: dict, agent_id: str, trigger: str = "scheduled"):
@@ -663,6 +672,9 @@ def _record_scheduler_run(task: dict, agent_id: str, trigger: str = "scheduled")
             extras={
                 "action_type": action.get("type", ""),
                 "channel_type": _primary_channel_type(action.get("channel_type")),
+                # The exact delivery instance, so the detail view can show which
+                # channel instance ran it (resolved to a friendly name client-side).
+                "instance_id": action.get("instance_id") or "",
                 "task_name": task.get("name", ""),
                 "trigger": trigger,
             },

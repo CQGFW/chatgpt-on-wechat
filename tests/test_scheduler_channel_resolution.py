@@ -279,6 +279,31 @@ def test_unknown_channel_type_is_always_ready(monkeypatch):
     assert integration._is_channel_ready("unknown", "whoever") is True
 
 
+class _FakeWebChannel:
+    """A web channel with no live polling queue (e.g. just after a restart)."""
+
+    channel_type = "web"
+    instance_id = "web"
+
+    def __init__(self):
+        self.session_queues = {}
+
+    def has_session_queue(self, session_id, agent_id=None):
+        return False
+
+
+def test_web_is_ready_even_without_session_queue(monkeypatch):
+    """A web session is always a valid delivery target: the message is persisted
+    to history and an idle client keeps polling, so readiness must not gate on
+    the in-memory session_queues. Gating there used to defer a scheduled push
+    forever after a restart, even with the session and polling client present."""
+    web = _FakeWebChannel()
+    _install_manager(monkeypatch, _FakeManager({"web": web}))
+    _install_directory(monkeypatch, [])
+
+    assert integration._is_channel_ready("web", "session_abc", instance_id="web") is True
+
+
 def test_directory_lookup_failure_does_not_break_resolution(monkeypatch):
     """If the recipient directory is unreadable, resolution must degrade
     gracefully (fall through), never raise into the scheduler tick."""
