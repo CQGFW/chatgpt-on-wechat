@@ -304,6 +304,21 @@ const I18N = {
         feishu_mode_scan: '扫码创建', feishu_mode_manual: '手动填写',
         tasks_title: '定时任务', tasks_desc: '查看和管理定时任务',
         tasks_coming: '即将推出', tasks_coming_desc: '定时任务管理功能即将在此提供',
+        tasks_tab_tasks: '任务', tasks_tab_records: '执行记录',
+        records_desc: '查看定时任务的执行历史',
+        records_loading: '加载执行记录中...', records_empty: '暂无执行记录',
+        records_empty_guide: '任务执行后，成功与失败的记录都会显示在这里',
+        records_status_done: '成功', records_status_error: '失败', records_status_running: '执行中',
+        records_trigger_scheduled: '定时触发', records_trigger_manual: '手动执行',
+        records_duration: '耗时', records_no_output: '（无内容）',
+        record_detail_title: '执行详情', record_detail_loading: '加载详情中...',
+        record_detail_status: '状态', record_detail_trigger: '触发方式',
+        record_detail_started: '开始时间', record_detail_duration: '耗时',
+        record_detail_channel_type: '通道类型', record_detail_channel_name: '通道名称',
+        record_detail_agent: '智能体', record_detail_output: '发送内容',
+        record_detail_view_preview: '预览', record_detail_view_text: '文本',
+        record_detail_error: '错误信息',
+        record_channel_web_type: 'web', record_channel_web_name: '网页',
         task_add_btn: '新增任务',
         task_edit_title: '编辑定时任务',
         task_add_title: '新增定时任务',
@@ -771,6 +786,21 @@ const I18N = {
         feishu_mode_scan: '掃碼建立', feishu_mode_manual: '手動填寫',
         tasks_title: '定時任務', tasks_desc: '檢視和管理定時任務',
         tasks_coming: '即將推出', tasks_coming_desc: '定時任務管理功能即將在此提供',
+        tasks_tab_tasks: '任務', tasks_tab_records: '執行記錄',
+        records_desc: '檢視定時任務的執行歷史',
+        records_loading: '載入執行記錄中...', records_empty: '暫無執行記錄',
+        records_empty_guide: '任務執行後，成功與失敗的記錄都會顯示在這裡',
+        records_status_done: '成功', records_status_error: '失敗', records_status_running: '執行中',
+        records_trigger_scheduled: '定時觸發', records_trigger_manual: '手動執行',
+        records_duration: '耗時', records_no_output: '（無內容）',
+        record_detail_title: '執行詳情', record_detail_loading: '載入詳情中...',
+        record_detail_status: '狀態', record_detail_trigger: '觸發方式',
+        record_detail_started: '開始時間', record_detail_duration: '耗時',
+        record_detail_channel_type: '通道類型', record_detail_channel_name: '通道名稱',
+        record_detail_agent: '智慧體', record_detail_output: '傳送內容',
+        record_detail_view_preview: '預覽', record_detail_view_text: '文字',
+        record_detail_error: '錯誤訊息',
+        record_channel_web_type: 'web', record_channel_web_name: '網頁',
         task_add_btn: '新增任務',
         task_edit_title: '編輯定時任務',
         task_add_title: '新增定時任務',
@@ -1233,6 +1263,21 @@ const I18N = {
         feishu_mode_scan: 'Scan QR', feishu_mode_manual: 'Manual',
         tasks_title: 'Scheduled Tasks', tasks_desc: 'View and manage scheduled tasks',
         tasks_coming: 'Coming Soon', tasks_coming_desc: 'Scheduled task management will be available here',
+        tasks_tab_tasks: 'Tasks', tasks_tab_records: 'History',
+        records_desc: 'Execution history of scheduled tasks',
+        records_loading: 'Loading history...', records_empty: 'No executions yet',
+        records_empty_guide: 'Once tasks run, both successful and failed executions show up here',
+        records_status_done: 'Success', records_status_error: 'Failed', records_status_running: 'Running',
+        records_trigger_scheduled: 'Scheduled', records_trigger_manual: 'Manual',
+        records_duration: 'Duration', records_no_output: '(no content)',
+        record_detail_title: 'Execution detail', record_detail_loading: 'Loading detail...',
+        record_detail_status: 'Status', record_detail_trigger: 'Trigger',
+        record_detail_started: 'Started', record_detail_duration: 'Duration',
+        record_detail_channel_type: 'Channel type', record_detail_channel_name: 'Channel name',
+        record_detail_agent: 'Agent', record_detail_output: 'Delivered',
+        record_detail_view_preview: 'Preview', record_detail_view_text: 'Text',
+        record_detail_error: 'Error',
+        record_channel_web_type: 'web', record_channel_web_name: 'Web',
         task_add_btn: 'Add Task',
         task_edit_title: 'Edit Task',
         task_add_title: 'Add Task',
@@ -2162,13 +2207,18 @@ function sessionTitleOf(sid) {
     return el ? el.textContent.trim() : '';
 }
 
-function popNotification(title, body, sid) {
+function popNotification(title, body, sid, agentId) {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     try {
         const n = new Notification(title, { body: body || title });
         n.onclick = function() {
             window.focus();
-            if (sid && sid !== sessionId) switchSession(sid);
+            // The browser decides which tab a notification click activates, and
+            // it may not be the one that popped it. So ask ALL tabs to open this
+            // session (broadcastOpenSession) — whichever tab ends up foregrounded
+            // is then already on the right conversation. Also covers the case
+            // where this tab was on another view (e.g. scheduler config).
+            if (sid) broadcastOpenSession(sid, agentId);
             n.close();
         };
     } catch (_) {
@@ -2176,7 +2226,7 @@ function popNotification(title, body, sid) {
     }
 }
 
-function showTaskNotification(title, body, sid) {
+function showTaskNotification(title, body, sid, agentId) {
     if (!taskNotifyEnabled) return;
     // Only notify when the window is not focused. If the user is actively
     // watching the tab, the reply is already on screen — a notification/beep
@@ -2194,7 +2244,7 @@ function showTaskNotification(title, body, sid) {
     if (Notification.permission === 'default') {
         Notification.requestPermission()
             .then(function(perm) {
-                if (perm === 'granted') popNotification(title, body, sid);
+                if (perm === 'granted') popNotification(title, body, sid, agentId);
                 else refreshNotifyBlockedHint();
             })
             .catch(function() {});
@@ -2205,13 +2255,167 @@ function showTaskNotification(title, body, sid) {
         refreshNotifyBlockedHint();
         return;
     }
-    popNotification(title, body, sid);
+    popNotification(title, body, sid, agentId);
 }
 
-function notifyTaskFinished(sid, kind, text) {
+function notifyTaskFinished(sid, kind, text, agentId) {
     const label = t(kind === 'error' ? 'notify_task_error' : 'notify_task_done');
     const snippet = firstLineSnippet(text);
-    showTaskNotification(sessionTitleOf(sid) || label, snippet ? `${label}: ${snippet}` : label, sid);
+    showTaskNotification(sessionTitleOf(sid) || label, snippet ? `${label}: ${snippet}` : label, sid, agentId);
+}
+
+// The global runs poller is the single source of scheduler notifications (the
+// /poll loop deliberately stays silent for scheduler pushes). A run can surface
+// in overlapping poll windows AND — the important case — the SAME run is seen
+// independently by EVERY open browser tab, each running its own poll loop. To
+// pop exactly one notification per run across all tabs, the "already notified"
+// set is persisted in localStorage (shared by all same-origin tabs) and the
+// claiming tab broadcasts the id so peers drop it immediately (localStorage
+// alone races when two ticks fire ~simultaneously in different tabs).
+const _NOTIFIED_RUNS_KEY = 'cow_notified_run_ids';
+const _NOTIFIED_RUNS_MAX = 500;
+const _notifiedRunIds = new Set();   // in-memory mirror of the shared set
+
+// Cross-tab channel: a tab that claims a run tells the others right away, and a
+// notification click asks all tabs to open the target session (see
+// broadcastOpenSession) — since the browser, not us, decides which tab a system
+// notification click activates, every tab pre-navigates so whichever one comes
+// to the foreground is already on the right conversation.
+let _notifyBus = null;
+try {
+    if (typeof BroadcastChannel !== 'undefined') {
+        _notifyBus = new BroadcastChannel('cow_scheduler_notify');
+        _notifyBus.onmessage = (e) => {
+            const data = e && e.data;
+            if (!data) return;
+            if (data.type === 'open-session' && data.sid) {
+                // Another tab's notification was clicked. Open the session here
+                // too so this tab is correct if the browser activates it. Guarded
+                // to the chat view switch; no focus stealing (browser owns that).
+                try { switchSession(data.sid, data.agentId || ''); } catch (_) {}
+                return;
+            }
+            // Default (legacy) shape: a claimed run id.
+            if (data.runId) _notifiedRunIds.add(data.runId);
+        };
+    }
+} catch (_) { _notifyBus = null; }
+
+// Tell every tab to open this session, then open it locally. Used on
+// notification click so the tab the browser foregrounds is already correct.
+function broadcastOpenSession(sid, agentId) {
+    if (!sid) return;
+    if (_notifyBus) {
+        try { _notifyBus.postMessage({ type: 'open-session', sid, agentId: agentId || '' }); } catch (_) {}
+    }
+    try { switchSession(sid, agentId); } catch (_) {}
+}
+
+// Route a manual "run now" notification back to the tab the user clicked in.
+// This tab records ownership in-memory (_manualRunOrigin); a shared localStorage
+// marker (_MANUAL_ORIGIN_KEY) lets OTHER tabs know *some* tab owns it so they
+// stay silent, without them mistakenly thinking they own it.
+const _manualRunOrigin = {};          // task_id -> ts (this tab's own claims)
+const _MANUAL_ORIGIN_KEY = 'cow_manual_run_origin';
+const _MANUAL_ORIGIN_TTL = 120000;    // 2 min: long enough for the run to surface
+
+function _claimManualRunOrigin(taskId) {
+    const now = Date.now();
+    _manualRunOrigin[taskId] = now;
+    setTimeout(() => { delete _manualRunOrigin[taskId]; }, _MANUAL_ORIGIN_TTL);
+    try {
+        const raw = localStorage.getItem(_MANUAL_ORIGIN_KEY);
+        const map = raw ? (JSON.parse(raw) || {}) : {};
+        // Drop stale entries so the shared marker can't grow unbounded.
+        for (const k of Object.keys(map)) {
+            if (now - map[k] >= _MANUAL_ORIGIN_TTL) delete map[k];
+        }
+        map[taskId] = now;
+        localStorage.setItem(_MANUAL_ORIGIN_KEY, JSON.stringify(map));
+    } catch (_) {}
+}
+
+// True if any tab (this one or a peer, within the TTL) claimed a manual run for
+// this task. Reads the shared marker written by _claimManualRunOrigin.
+function _someTabOwnsManualRun(taskId) {
+    if (_manualRunOrigin[taskId]) return true;
+    try {
+        const raw = localStorage.getItem(_MANUAL_ORIGIN_KEY);
+        if (!raw) return false;
+        const map = JSON.parse(raw) || {};
+        const ts = map[taskId];
+        return !!ts && (Date.now() - ts) < _MANUAL_ORIGIN_TTL;
+    } catch (_) { return false; }
+}
+
+function _loadNotifiedRunIds() {
+    try {
+        const raw = localStorage.getItem(_NOTIFIED_RUNS_KEY);
+        if (!raw) return [];
+        const arr = JSON.parse(raw);
+        return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+}
+
+function _persistNotifiedRunIds(ids) {
+    try { localStorage.setItem(_NOTIFIED_RUNS_KEY, JSON.stringify(ids)); } catch (_) {}
+}
+
+function claimScheduledRunNotify(runId) {
+    if (!runId) return true;         // no id -> can't dedupe, allow once
+
+    // Fast path: this tab already saw it (own tick or a peer's broadcast).
+    if (_notifiedRunIds.has(runId)) return false;
+
+    // Re-read the shared set so a claim from another tab that happened between
+    // our ticks is honoured even if its broadcast was missed.
+    const shared = _loadNotifiedRunIds();
+    for (const id of shared) _notifiedRunIds.add(id);
+    if (_notifiedRunIds.has(runId)) return false;
+
+    // Claim it: record locally, persist to the shared store, and tell peers.
+    _notifiedRunIds.add(runId);
+    shared.push(runId);
+    // Bound growth; the poll only looks back a short window so trimmed ids
+    // can never reappear.
+    const trimmed = shared.length > _NOTIFIED_RUNS_MAX
+        ? shared.slice(shared.length - _NOTIFIED_RUNS_MAX)
+        : shared;
+    _persistNotifiedRunIds(trimmed);
+    if (_notifyBus) { try { _notifyBus.postMessage({ runId }); } catch (_) {} }
+    return true;
+}
+
+// Force a scheduled-task notification regardless of window focus.
+//
+// showTaskNotification() suppresses itself when the window is focused, which is
+// right for a normal reply the user is watching stream in. A scheduled task is
+// different: it can fire into a session the user isn't currently viewing (or
+// while they're looking at another app/tab), so if we don't notify they have no
+// way to know it happened. This reuses the same popNotification() plumbing but
+// skips the focus gate. Still honours the user's "Task Notifications" toggle.
+function forceScheduledNotification(title, body, sid, agentId) {
+    if (!taskNotifyEnabled) return;
+    playNotifyBeep();
+    if (document.hidden) {
+        unreadCount += 1;
+        document.title = `(${unreadCount}) ${baseDocTitle}`;
+    }
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+        Notification.requestPermission()
+            .then(function(perm) {
+                if (perm === 'granted') popNotification(title, body, sid, agentId);
+                else refreshNotifyBlockedHint();
+            })
+            .catch(function() {});
+        return;
+    }
+    if (Notification.permission === 'denied') {
+        refreshNotifyBlockedHint();
+        return;
+    }
+    popNotification(title, body, sid, agentId);
 }
 
 document.addEventListener('visibilitychange', function() {
@@ -6837,9 +7041,15 @@ function startSSE(requestId, loadingEl, timestamp, titleInfo, replayItems) {
                 if (item.bot_seq !== undefined && item.bot_seq !== null) {
                     completedBotSeq = item.bot_seq;
                 }
-                notifyTaskFinished(ownerSession, 'done', item.content);
+                // Scheduler deliveries are notified solely by the global runs
+                // poller (maybeNotifyScheduledRun), which forces a notice across
+                // all sessions and dedupes by run id. Notifying here too would
+                // double-pop, so skip scheduler streams.
+                if (!isSchedulerRequest(requestId)) {
+                    notifyTaskFinished(ownerSession, 'done', item.content, ownerAgent);
+                }
             } else if (item.type === 'error') {
-                if (!cancelled) notifyTaskFinished(ownerSession, 'error', '');
+                if (!cancelled && !isSchedulerRequest(requestId)) notifyTaskFinished(ownerSession, 'error', '', ownerAgent);
             } else if (
                 item.type === 'voice_attach'
                 && item.url
@@ -6985,13 +7195,19 @@ function startPolling() {
                     if (welcomeScreen) welcomeScreen.remove();
                     addBotMessage(data.content, new Date(data.timestamp * 1000), rid);
                     scrollChatToBottom();
-                    // Pushed message (scheduler result, missed reply): show the
-                    // content itself, matching the desktop push notification.
-                    showTaskNotification(
-                        sessionTitleOf(sessionId) || 'CowAgent',
-                        firstLineSnippet(data.content),
-                        sessionId
-                    );
+                    // Scheduler executions are notified by the global runs poll
+                    // (maybeNotifyScheduledRun) — it forces a notice across ALL
+                    // sessions, including this one and manual "run now", and
+                    // dedupes by run id. Notifying here too would double-pop, so
+                    // only notify for an ordinary missed reply.
+                    if (!isSchedulerRequest(rid)) {
+                        showTaskNotification(
+                            sessionTitleOf(sessionId) || 'CowAgent',
+                            firstLineSnippet(data.content),
+                            sessionId,
+                            activeAgentId
+                        );
+                    }
                 }
             }
             const delay = (data.status === 'success' && data.has_content) ? 5000 : 10000;
@@ -7000,6 +7216,107 @@ function startPolling() {
         .catch(() => { pollInFlight = false; setTimeout(poll, 10000); });
     }
     poll();
+}
+
+// ---- Cross-session scheduler notifications -------------------------------
+//
+// startPolling() above only watches the *currently open* session, so a
+// scheduled task firing into any other session (the common case for reminders)
+// would never surface. This second loop polls the global runs ledger instead:
+// "any scheduled execution since I last checked?" It runs independent of which
+// session is active and fires a forced notification (see
+// forceScheduledNotification) for web/desktop scheduled deliveries the user
+// isn't currently watching. The message body itself is already persisted to the
+// session history, so clicking the notification just jumps there and loads it.
+let schedulerNotifySince = Math.floor(Date.now() / 1000);  // ignore pre-load history
+let schedulerNotifyStarted = false;
+
+function startSchedulerNotifyPolling() {
+    if (schedulerNotifyStarted) return;  // one loop process-wide
+    schedulerNotifyStarted = true;
+
+    function tick() {
+        // Explicit empty agent_id=: a scheduled task can belong to ANY Agent, so
+        // this must query the whole-team ledger. The global fetch() override
+        // (see above) auto-injects the *active* Agent's id into every '/' URL
+        // that lacks agent_id=, which would wrongly scope this poll to whatever
+        // Agent the user has selected and hide other Agents' runs. Pre-supplying
+        // agent_id= (empty -> whole team on the backend) opts out of that.
+        fetch(`/api/scheduler/runs?since=${schedulerNotifySince}&limit=20&agent_id=`)
+            .then(r => r.json())
+            .then(data => {
+                if (data && data.status === 'success' && Array.isArray(data.runs)) {
+                    // Oldest first so notifications arrive in execution order and
+                    // schedulerNotifySince advances monotonically.
+                    const runs = data.runs.slice().sort(
+                        (a, b) => (a.started_at || 0) - (b.started_at || 0)
+                    );
+                    for (const run of runs) {
+                        if (run.started_at && run.started_at > schedulerNotifySince) {
+                            schedulerNotifySince = run.started_at;
+                        }
+                        maybeNotifyScheduledRun(run);
+                    }
+                }
+            })
+            .catch(() => { /* transient; keep polling */ })
+            .finally(() => setTimeout(tick, 10000));
+    }
+    tick();
+}
+
+// Kick off the scheduler-notification poll once the whole script has evaluated.
+// Calling it from the top-level startup block earlier in the file would read
+// this loop's ``let`` state (schedulerNotifyStarted, declared just above) before
+// its declaration ran — a temporal-dead-zone crash that also aborted every
+// top-level statement after it, cascading into unrelated "before initialization"
+// errors (_sessCfg, sessionPanelOpen, ...). Deferring to window load runs it
+// after all declarations are initialized.
+if (typeof window !== 'undefined') {
+    window.addEventListener('load', startSchedulerNotifyPolling);
+}
+
+// Scheduler deliveries stream over a request id shaped ``scheduler_<taskid>_<hex>``
+// (see integration._generate_request_id). Used to keep the SSE done handler from
+// double-notifying alongside the global runs poller.
+function isSchedulerRequest(requestId) {
+    return typeof requestId === 'string' && requestId.startsWith('scheduler_');
+}
+
+function maybeNotifyScheduledRun(run) {
+    // Only client-delivered tasks: WeChat/Feishu etc. already push into the IM
+    // app, so re-notifying in the console would be noise.
+    const channel = run.channel_type || '';
+    if (channel && channel !== 'web') return;
+    // Skip failed runs — nothing was delivered to the session to jump to.
+    if (run.status && run.status !== 'done') return;
+    const sid = run.session_id;
+    if (!sid) return;
+
+    // Manual "run now": route the notification back to the tab the user clicked
+    // in. Only the originating tab has _manualRunOrigin[task_id] set, so other
+    // tabs stay silent (they'd otherwise steal focus to a random tab that also
+    // has this session open). If NO tab owns it (e.g. triggered from desktop or
+    // a reloaded tab), fall through and let cross-tab dedup pick a single tab.
+    if (run.trigger === 'manual' && run.task_id) {
+        const anyTabOwns = _someTabOwnsManualRun(run.task_id);
+        const iOwn = !!_manualRunOrigin[run.task_id];
+        if (anyTabOwns && !iOwn) return;   // another tab owns it
+    }
+
+    // Dedupe by run id across ALL open tabs (claimScheduledRunNotify persists to
+    // localStorage + broadcasts), so multiple tabs don't each pop the same run.
+    if (!claimScheduledRunNotify(run.run_id)) return;
+    // Always force a notification, even for the currently-open session and for
+    // manual "run now": a scheduled execution should announce itself wherever
+    // the user is. The /poll loop deliberately skips notifying for scheduler
+    // pushes, so this is the single source (no double-fire).
+
+    const label = t('notify_task_done');
+    const snippet = firstLineSnippet(run.output_preview || '');
+    const title = run.task_name || sessionTitleOf(sid) || label;
+    const body = snippet ? `${label}: ${snippet}` : label;
+    forceScheduledNotification(title, body, sid, run.agent_id || '');
 }
 
 // Attachment markers the backend appends to the prompt, keyed by the label it
@@ -13272,26 +13589,272 @@ function connectFeishuAfterRegister(appId, appSecret) {
 // Scheduler View
 // =====================================================================
 let tasksLoaded = false;
+// Which sub-tab of the Tasks view is showing: 'tasks' | 'records'.
+let tasksActiveTab = 'tasks';
+let runsLoaded = false;
+
+// Switch between the task list and the execution-record history. The header's
+// add/refresh buttons and subtitle follow the active tab so the two panes share
+// one chrome (mirrors the desktop client).
+function switchTasksTab(tab) {
+    tasksActiveTab = tab;
+    const isTasks = tab === 'tasks';
+    document.getElementById('tasks-pane').classList.toggle('hidden', !isTasks);
+    document.getElementById('runs-pane').classList.toggle('hidden', isTasks);
+    // Add button is only meaningful on the task list.
+    const addBtn = document.getElementById('task-add-btn');
+    if (addBtn) addBtn.classList.toggle('hidden', !isTasks);
+    const subtitle = document.getElementById('tasks-subtitle');
+    if (subtitle) subtitle.textContent = t(isTasks ? 'tasks_desc' : 'records_desc');
+
+    // Tab visual state (active color + underline).
+    [['tasks-tab-tasks', isTasks], ['tasks-tab-records', !isTasks]].forEach(([id, active]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle('text-primary-500', active);
+        el.classList.toggle('text-slate-400', !active);
+        el.classList.toggle('dark:text-slate-500', !active);
+        const underline = el.querySelector('.tasks-tab-underline');
+        if (underline) underline.classList.toggle('hidden', !active);
+    });
+
+    if (!isTasks) loadRunsView();
+}
+
 function refreshTasksView() {
     const btn = document.getElementById('task-refresh-btn');
     const icon = btn.querySelector('i');
-    
+
     // Add spin animation
     icon.classList.add('fa-spin');
     btn.disabled = true;
-    
-    tasksLoaded = false;
-    const listEl = document.getElementById('tasks-list');
-    listEl.innerHTML = '';
-    
-    loadTasksView();
-    
+
+    if (tasksActiveTab === 'records') {
+        runsLoaded = false;
+        loadRunsView();
+    } else {
+        tasksLoaded = false;
+        const listEl = document.getElementById('tasks-list');
+        listEl.innerHTML = '';
+        loadTasksView();
+    }
+
     // Restore button after animation ends
     setTimeout(() => {
         icon.classList.remove('fa-spin');
         btn.disabled = false;
     }, 500);
 }
+
+// ---- Execution records (history) -----------------------------------------
+
+// Format a Unix-seconds timestamp for display; '--' when absent/invalid.
+function formatRunTime(sec) {
+    if (!sec) return '--';
+    const d = new Date(sec * 1000);
+    return isNaN(d.getTime()) ? '--' : d.toLocaleString();
+}
+
+// Compact elapsed time between start and end (blank while still running).
+function formatRunDuration(start, end) {
+    if (!start || !end || end < start) return '';
+    const s = end - start;
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${m}m ${r}s` : `${m}m`;
+}
+
+// Status pill (done / error / running) matching the task-card status dot palette.
+function runStatusBadge(status) {
+    if (status === 'done') {
+        return `<span class="inline-flex items-center gap-1 text-emerald-500"><i class="fas fa-circle-check text-xs"></i><span class="text-xs font-medium">${t('records_status_done')}</span></span>`;
+    }
+    if (status === 'error') {
+        return `<span class="inline-flex items-center gap-1 text-red-500"><i class="fas fa-circle-xmark text-xs"></i><span class="text-xs font-medium">${t('records_status_error')}</span></span>`;
+    }
+    return `<span class="inline-flex items-center gap-1 text-slate-400"><i class="fas fa-spinner fa-spin text-xs"></i><span class="text-xs font-medium">${t('records_status_running')}</span></span>`;
+}
+
+// A web task is delivered to a chat session, not a bound IM instance, so present
+// it with the friendly web type / name instead of a bare type + empty name.
+function runChannelDisplay(run) {
+    const isWeb = run.channel_type === 'web' || (!run.channel_type && !run.instance_id);
+    if (isWeb) return { type: t('record_channel_web_type'), name: t('record_channel_web_name') };
+    const inst = (taskInstances || []).find(i => i.instance_id === run.instance_id);
+    return { type: run.channel_type || '', name: (inst && inst.name) || run.instance_id || '' };
+}
+
+function loadRunsView() {
+    if (runsLoaded) return;
+    const rosterReady = agentCatalog.length ? Promise.resolve() : loadAgentCatalog();
+    const loadingEl = document.getElementById('runs-loading');
+    const emptyEl = document.getElementById('runs-empty');
+    const listEl = document.getElementById('runs-list');
+    loadingEl.classList.remove('hidden'); loadingEl.classList.add('flex');
+    emptyEl.classList.add('hidden'); listEl.classList.add('hidden');
+
+    rosterReady.then(() => Promise.all([
+        // Empty agent_id => whole team's history (not the active chat Agent).
+        fetch('/api/scheduler/runs?agent_id=&limit=200').then(r => r.json()).catch(() => null),
+        // Instances feed the friendly channel-name resolution; cached in taskInstances.
+        (taskInstances && taskInstances.length)
+            ? Promise.resolve({ status: 'success', instances: taskInstances })
+            : fetch('/api/scheduler/instances').then(r => r.json()).catch(() => null),
+    ])).then(([runData, instData]) => {
+        runsLoaded = true;
+        loadingEl.classList.add('hidden'); loadingEl.classList.remove('flex');
+        if (instData && instData.status === 'success') taskInstances = instData.instances || [];
+        const runs = (runData && runData.status === 'success') ? (runData.runs || []) : [];
+        if (runs.length === 0) {
+            emptyEl.classList.remove('hidden'); emptyEl.classList.add('flex');
+            listEl.classList.add('hidden');
+            return;
+        }
+        emptyEl.classList.add('hidden'); emptyEl.classList.remove('flex');
+        listEl.classList.remove('hidden');
+        listEl.innerHTML = '';
+        runs.forEach(run => listEl.appendChild(renderRunCard(run)));
+    });
+}
+
+function renderRunCard(run) {
+    const card = document.createElement('div');
+    card.className = 'bg-white dark:bg-[#1A1A1A] rounded-xl border border-slate-200 dark:border-white/10 p-4 cursor-pointer hover:border-slate-300 dark:hover:border-white/20 transition-colors';
+    const owner = (multiAgentMode() && run.agent_id) ? findAgent(run.agent_id) : null;
+    const ownerChip = owner
+        ? `<span class="inline-flex items-center gap-1 pl-1 pr-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-[10px] leading-none text-slate-400 dark:text-slate-500">${agentAvatarHTML(owner, 15)}<span class="truncate max-w-[80px]">${escapeHtml(owner.name || owner.id)}</span></span>`
+        : '';
+    const trigger = run.trigger === 'manual' ? t('records_trigger_manual') : t('records_trigger_scheduled');
+    const duration = formatRunDuration(run.started_at, run.ended_at);
+    const bodyLine = (run.status === 'error' && run.error)
+        ? `<p class="text-xs text-red-500 mb-2 line-clamp-2 break-words">${escapeHtml(run.error)}</p>`
+        : `<p class="text-xs text-slate-500 dark:text-slate-400 mb-2 line-clamp-2 break-words">${run.output_preview ? escapeHtml(run.output_preview) : `<span class="italic text-slate-400">${t('records_no_output')}</span>`}</p>`;
+    card.innerHTML = `
+        <div class="flex items-center gap-2 mb-1.5">
+            ${runStatusBadge(run.status)}
+            <span class="font-medium text-sm text-slate-700 dark:text-slate-200 truncate">${escapeHtml(run.task_name || run.task_id || t('tasks_tab_records'))}</span>
+            ${ownerChip}
+            <div class="flex-1"></div>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-400 dark:text-slate-500">${escapeHtml(trigger)}</span>
+        </div>
+        ${bodyLine}
+        <div class="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500">
+            <i class="fas fa-clock"></i><span>${formatRunTime(run.started_at)}</span>
+            ${duration ? `<span class="opacity-50">·</span><span>${t('records_duration')} ${duration}</span>` : ''}
+        </div>`;
+    card.addEventListener('click', () => showRunDetailModal(run));
+    return card;
+}
+
+function showRunDetailModal(run) {
+    const overlay = document.getElementById('run-detail-modal-overlay');
+    document.getElementById('run-detail-title').textContent = run.task_name || run.task_id || t('record_detail_title');
+
+    const ch = runChannelDisplay(run);
+    const owner = (multiAgentMode() && run.agent_id) ? findAgent(run.agent_id) : null;
+    const trigger = run.trigger === 'manual' ? t('records_trigger_manual') : t('records_trigger_scheduled');
+    const duration = formatRunDuration(run.started_at, run.ended_at);
+    const cell = (label, valueHtml) => `<div><div class="text-xs text-slate-400 dark:text-slate-500 mb-0.5">${label}</div><div class="text-slate-700 dark:text-slate-200">${valueHtml}</div></div>`;
+    const meta = [];
+    meta.push(cell(t('record_detail_status'), runStatusBadge(run.status)));
+    meta.push(cell(t('record_detail_trigger'), escapeHtml(trigger)));
+    meta.push(cell(t('record_detail_started'), escapeHtml(formatRunTime(run.started_at))));
+    if (duration) meta.push(cell(t('record_detail_duration'), escapeHtml(duration)));
+    if (ch.type) meta.push(cell(t('record_detail_channel_type'), escapeHtml(ch.type)));
+    if (ch.name) meta.push(cell(t('record_detail_channel_name'), `<span class="break-all">${escapeHtml(ch.name)}</span>`));
+    if (owner) meta.push(cell(t('record_detail_agent'), `<span class="inline-flex items-center gap-1.5">${agentAvatarHTML(owner, 16)}<span class="truncate max-w-[140px]">${escapeHtml(owner.name || owner.id)}</span></span>`));
+    document.getElementById('run-detail-meta').innerHTML = meta.join('');
+
+    const errWrap = document.getElementById('run-detail-error-wrap');
+    if (run.status === 'error' && run.error) {
+        errWrap.classList.remove('hidden');
+        document.getElementById('run-detail-error').textContent = run.error;
+    } else {
+        errWrap.classList.add('hidden');
+    }
+
+    const outEl = document.getElementById('run-detail-output');
+    // Show the preview immediately, then swap in the full body once fetched.
+    outEl.innerHTML = `<span class="text-slate-400"><i class="fas fa-spinner fa-spin mr-1"></i>${t('record_detail_loading')}</span>`;
+    runDetailBody = '';
+    runDetailView = 'preview';  // always default to rendered markdown on open
+    updateRunDetailViewToggle();
+    overlay.classList.remove('hidden');
+
+    fetch(`/api/scheduler/runs/detail?run_id=${encodeURIComponent(run.run_id)}`)
+        .then(r => r.json())
+        .then(data => {
+            const detail = (data && data.status === 'success') ? data.run : null;
+            const body = (detail && detail.full_output) || run.output_preview || '';
+            runDetailBody = body;
+            renderRunDetailOutput();
+        })
+        .catch(() => {
+            runDetailBody = run.output_preview || '';
+            renderRunDetailOutput();
+        });
+}
+
+// The run-detail output can be shown as rendered Markdown (default) or as raw
+// text. We keep the fetched body around so toggling between the two views never
+// needs a refetch.
+let runDetailBody = '';
+let runDetailView = 'preview';  // 'preview' (markdown) | 'text' (raw)
+
+function renderRunDetailOutput() {
+    const outEl = document.getElementById('run-detail-output');
+    if (!outEl) return;
+    if (!runDetailBody) {
+        outEl.classList.remove('whitespace-pre-wrap');
+        outEl.innerHTML = `<span class="italic text-slate-400">${t('records_no_output')}</span>`;
+        return;
+    }
+    if (runDetailView === 'text') {
+        // Raw text: preserve newlines/indentation, no markdown parsing.
+        outEl.classList.add('whitespace-pre-wrap');
+        outEl.textContent = runDetailBody;
+    } else {
+        outEl.classList.remove('whitespace-pre-wrap');
+        outEl.innerHTML = `<div class="agent-content-body">${renderMarkdown(runDetailBody)}</div>`;
+    }
+}
+
+function updateRunDetailViewToggle() {
+    const toggle = document.getElementById('run-detail-view-toggle');
+    if (!toggle) return;
+    toggle.querySelectorAll('button[data-view]').forEach(btn => {
+        const active = btn.dataset.view === runDetailView;
+        btn.classList.toggle('bg-slate-800', active);
+        btn.classList.toggle('dark:bg-white/15', active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('dark:text-white', active);
+        btn.classList.toggle('text-slate-500', !active);
+        btn.classList.toggle('dark:text-slate-400', !active);
+    });
+}
+
+function setRunDetailView(view) {
+    if (view !== 'preview' && view !== 'text') return;
+    runDetailView = view;
+    updateRunDetailViewToggle();
+    renderRunDetailOutput();
+}
+
+(function wireRunDetailModal() {
+    const overlay = document.getElementById('run-detail-modal-overlay');
+    if (!overlay) return;
+    const close = () => overlay.classList.add('hidden');
+    const closeBtn = document.getElementById('run-detail-close');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    const toggle = document.getElementById('run-detail-view-toggle');
+    if (toggle) {
+        toggle.querySelectorAll('button[data-view]').forEach(btn => {
+            btn.addEventListener('click', () => setRunDetailView(btn.dataset.view));
+        });
+    }
+})();
 
 function runTaskNow(task, button) {
     showConfirmDialog({
@@ -13308,6 +13871,10 @@ function runTaskNow(task, button) {
                 body: JSON.stringify({task_id: task.id, agent_id: task.agent_id || ''})
             }).then(r => r.json()).then(res => {
                 if (res.status !== 'success') throw new Error(res.message || t('task_run_failed'));
+                // Remember this tab kicked off the run so its notification is
+                // routed back here (see maybeNotifyScheduledRun), not to some
+                // other tab that also happens to have this session open.
+                _claimManualRunOrigin(task.id);
                 button.innerHTML = `<i class="fas fa-check mr-1"></i>${t('task_run_started')}`;
                 setTimeout(() => {
                     button.innerHTML = originalHtml;
@@ -13568,7 +14135,7 @@ navigateTo = function(viewId) {
     }
     else if (viewId === 'knowledge') loadKnowledgeView();
     else if (viewId === 'channels') loadChannelsView();
-    else if (viewId === 'tasks') loadTasksView();
+    else if (viewId === 'tasks') { switchTasksTab('tasks'); loadTasksView(); }
     else if (viewId === 'logs') startLogStream();
 };
 

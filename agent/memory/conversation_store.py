@@ -229,6 +229,25 @@ def _is_evolution_text(text: str) -> bool:
     return (text or "").lstrip().startswith(_EVOLUTION_DISPLAY_MARKER)
 
 
+def _message_plain_text(raw_content: Any) -> str:
+    """Human-readable text of a stored message, whose content is a JSON string.
+
+    Decodes the DB-stored JSON (a string or a list of content blocks) and reuses
+    :func:`_extract_display_text`. Returns '' for tool-only messages.
+    """
+    try:
+        content = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+    except Exception:
+        content = raw_content
+    return _extract_display_text(content)
+
+
+def _message_is_scheduled_marker(raw_content: Any) -> bool:
+    """True when a stored user message is the ``[SCHEDULED]`` injection marker
+    that precedes a scheduled task's delivered assistant reply."""
+    return _is_internal_user_marker(_message_plain_text(raw_content))
+
+
 def _clean_display_text(text: str) -> str:
     """Strip internal markers from assistant text for user-facing display.
 
@@ -1332,15 +1351,30 @@ class ConversationStore:
         task_source: Optional[str] = None,
         task_id: Optional[str] = None,
         status: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        since: Optional[int] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """List runs, newest first, filtered by any combination of the given
         dimensions. ``parent_run_id=''`` selects top-level runs only.
+
+        ``since`` keeps only runs that *started strictly after* the given epoch
+        seconds; it powers the client's cross-session scheduler poll, which asks
+        "any new executions since I last checked?" without re-fetching history.
+
+        Unlike the conversation methods this is intentionally *not* scoped to the
+        store's bound ``self._agent_id``: the runs table is one global ledger and
+        the console shows the whole team's activity by default. Pass an explicit
+        ``agent_id`` to scope to a single Agent (``''`` selects the default
+        Agent's own rows).
         """
         if not self._runs_ready:
             return []
         clauses: List[str] = []
         params: List[Any] = []
+        if agent_id is not None:
+            clauses.append("agent_id = ?")
+            params.append(agent_id)
         if session_id is not None:
             clauses.append("session_id = ?")
             params.append(session_id)
@@ -1356,6 +1390,9 @@ class ConversationStore:
         if status is not None:
             clauses.append("status = ?")
             params.append(status)
+        if since is not None:
+            clauses.append("started_at > ?")
+            params.append(since)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(max(1, limit))
         with self._lock:
@@ -1369,6 +1406,83 @@ class ConversationStore:
             finally:
                 conn.close()
         return [self._run_row_to_dict(r) for r in rows]
+
+    def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """A run plus the full text it delivered, for a history detail view.
+
+        The runs row only keeps a short ``output_preview`` (a list-view index).
+        The complete delivered message lives in the *receiver's session*, which
+        the scheduler threads the push into (``_remember_delivered_output``), so
+        this joins back to that session to recover the full body.
+
+        Correlation is by ``(session_id, agent_id)`` from the run, then the
+        scheduler-injected assistant message whose ``created_at`` is closest at
+        or after the run's ``started_at`` (the pair this run wrote). It is
+        best-effort: the session copy is itself capped (~2000 chars) and old
+        scheduler pairs are pruned, so ``full_output`` may be ``None`` — the
+        caller falls back to the preview. Messages are scoped to the *run's*
+        ``agent_id``, not this store's bound id, since a run may belong to any
+        Agent in the global ledger.
+        """
+        run = self.get_run(run_id)
+        if run is None:
+            return None
+
+        detail = dict(run)
+        extras = detail.pop("extras", {}) or {}
+        detail["task_name"] = extras.get("task_name", "")
+        detail["action_type"] = extras.get("action_type", "")
+        detail["channel_type"] = extras.get("channel_type", "")
+        detail["instance_id"] = extras.get("instance_id", "")
+        detail["trigger"] = extras.get("trigger", "")
+        detail["output_preview"] = extras.get("output_preview", "")
+        detail["full_output"] = None
+
+        session_id = run.get("session_id") or ""
+        if not session_id:
+            return detail
+
+        run_agent_id = run.get("agent_id") or ""
+        started_at = run.get("started_at") or 0
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """
+                    SELECT seq, role, content, created_at
+                    FROM messages
+                    WHERE agent_id = ? AND session_id = ?
+                    ORDER BY seq ASC
+                    """,
+                    (run_agent_id, session_id),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rows = []
+            finally:
+                conn.close()
+
+        # Assistant messages that answer a [SCHEDULED] user turn are the delivered
+        # bodies. Pick the one written closest at/after this run started; fall
+        # back to the newest scheduler body if none lands after the timestamp
+        # (clock skew, or the pair persisted a hair before the run row).
+        candidates: List[tuple] = []  # (created_at, text)
+        for i, (seq, role, raw, created_at) in enumerate(rows):
+            if role != "user":
+                continue
+            if not _message_is_scheduled_marker(raw):
+                continue
+            if i + 1 < len(rows) and rows[i + 1][1] == "assistant":
+                text = _message_plain_text(rows[i + 1][2])
+                if text:
+                    candidates.append((rows[i + 1][3] or 0, text))
+
+        if candidates:
+            after = [c for c in candidates if c[0] >= started_at]
+            chosen = min(after, key=lambda c: c[0]) if after else max(
+                candidates, key=lambda c: c[0]
+            )
+            detail["full_output"] = chosen[1]
+        return detail
 
     def load_history_page(
         self,

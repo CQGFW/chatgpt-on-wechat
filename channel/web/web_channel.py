@@ -2030,10 +2030,19 @@ class WebChannel(ChatChannel):
                     "has_content": False,
                     "agent_unavailable": True,
                 })
+            if not session_id:
+                return json.dumps({"status": "error", "message": "Invalid session ID"})
+
             session_queue_key = self._session_queue_key(session_id, agent_id)
 
-            if not session_id or session_queue_key not in self.session_queues:
-                return json.dumps({"status": "error", "message": "Invalid session ID"})
+            # A polling client is declaring "I'm listening on this session", so
+            # register a queue for it if one doesn't exist yet. Previously a
+            # queue was only created when the user sent a message, which meant an
+            # idle client (e.g. right after a restart, or a session opened but
+            # not typed in) had nowhere for a scheduled/proactive push to land —
+            # the push was dropped even though the client was actively polling.
+            if session_queue_key not in self.session_queues:
+                self.session_queues[session_queue_key] = Queue()
 
             # 尝试从队列获取响应，不等待
             try:
@@ -2194,6 +2203,8 @@ class WebChannel(ChatChannel):
             '/api/knowledge/action', 'KnowledgeActionHandler',
             '/api/knowledge/import', 'KnowledgeImportHandler',
             '/api/scheduler', 'SchedulerHandler',
+            '/api/scheduler/runs/detail', 'SchedulerRunDetailHandler',
+            '/api/scheduler/runs', 'SchedulerRunsHandler',
             '/api/scheduler/run', 'SchedulerRunHandler',
             '/api/scheduler/toggle', 'SchedulerToggleHandler',
             '/api/scheduler/update', 'SchedulerUpdateHandler',
@@ -6585,6 +6596,97 @@ class SchedulerHandler:
             return json.dumps({"status": "success", "tasks": tasks}, ensure_ascii=False)
         except Exception as e:
             logger.error(f"[WebChannel] Scheduler API error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerRunsHandler:
+    """Execution history for scheduled tasks.
+
+    Reads the same global ``runs`` ledger every scheduled execution writes to
+    (``task_source='scheduler'``) rather than a side-car store, so history JOINs
+    cleanly with native turns and needs no extra file. An explicit ``agent_id``
+    scopes the list to one Agent; without it the console shows the whole team's
+    history. An optional ``task_id`` narrows to a single task's runs.
+    """
+
+    def GET(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            params = web.input(agent_id='', task_id='', limit='100', since='')
+            requested = _request_agent_id(params)
+            task_id = (getattr(params, 'task_id', '') or '').strip()
+            try:
+                limit = max(1, min(500, int(params.limit)))
+            except (TypeError, ValueError):
+                limit = 100
+            # ``since`` (epoch seconds) powers the client's cross-session
+            # scheduler poll: return only executions started after the last one
+            # it saw, so a background window/tab can surface a notification for a
+            # task that fired in a session the user isn't currently viewing.
+            since_raw = (getattr(params, 'since', '') or '').strip()
+            try:
+                since = int(since_raw) if since_raw else None
+            except (TypeError, ValueError):
+                since = None
+
+            from agent.memory import get_conversation_store
+            store = get_conversation_store()
+            if store is None:
+                return json.dumps({"status": "success", "runs": []}, ensure_ascii=False)
+
+            runs = store.list_runs(
+                task_source="scheduler",
+                task_id=task_id or None,
+                agent_id=requested,  # None -> whole team; '' -> default Agent
+                since=since,
+                limit=limit,
+            )
+            # Flatten the light extras index onto each row so the client needs no
+            # knowledge of the sidecar shape.
+            for run in runs:
+                extras = run.pop("extras", {}) or {}
+                run["task_name"] = extras.get("task_name", "")
+                run["action_type"] = extras.get("action_type", "")
+                run["channel_type"] = extras.get("channel_type", "")
+                run["instance_id"] = extras.get("instance_id", "")
+                run["trigger"] = extras.get("trigger", "")
+                run["output_preview"] = extras.get("output_preview", "")
+            return json.dumps({"status": "success", "runs": runs}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler runs API error: {e}")
+            return json.dumps({"status": "error", "message": str(e)})
+
+
+class SchedulerRunDetailHandler:
+    """One execution's full detail for the history detail dialog.
+
+    The list view shows the short ``output_preview`` kept on the run row; opening
+    a record fetches the full delivered body by joining back to the receiver's
+    session (best-effort — see ``ConversationStore.get_run_detail``). Falls back
+    to the preview when the session copy was pruned or never injected.
+    """
+
+    def GET(self):
+        _require_auth()
+        web.header('Content-Type', 'application/json; charset=utf-8')
+        try:
+            params = web.input(run_id='')
+            run_id = (getattr(params, 'run_id', '') or '').strip()
+            if not run_id:
+                return json.dumps({"status": "error", "message": "run_id required"})
+
+            from agent.memory import get_conversation_store
+            store = get_conversation_store()
+            if store is None:
+                return json.dumps({"status": "error", "message": "store unavailable"})
+
+            detail = store.get_run_detail(run_id)
+            if detail is None:
+                return json.dumps({"status": "error", "message": "run not found"})
+            return json.dumps({"status": "success", "run": detail}, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"[WebChannel] Scheduler run detail API error: {e}")
             return json.dumps({"status": "error", "message": str(e)})
 
 
