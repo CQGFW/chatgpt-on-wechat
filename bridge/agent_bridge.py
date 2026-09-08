@@ -789,6 +789,67 @@ class AgentBridge:
             for message in messages or []
         ]
 
+    def _roster_speaker_labels(self) -> list:
+        """Names and ids a model might copy from a shared transcript."""
+        labels = []
+        try:
+            for profile in self.agent_registry.list(include_disabled=True):
+                if profile.name:
+                    labels.append(profile.name)
+                if profile.id:
+                    labels.append(profile.id)
+        except Exception:
+            return []
+        return labels
+
+    @staticmethod
+    def _strip_speaker_prefix(text: str, labels: list) -> str:
+        """Drop a leading speaker label the model copied from history.
+
+        Covers the forms a shared transcript can show: ``[Name]``,
+        ``Name：`` and ``Name(@id)：`` (with either colon).
+        """
+        if not text or not labels:
+            return text
+        escaped = "|".join(
+            re.escape(label)
+            for label in sorted({label for label in labels if label}, key=len, reverse=True)
+        )
+        if not escaped:
+            return text
+        name = rf"(?:{escaped})"
+        return re.sub(
+            rf"^\s*(?:\[{name}\]|{name}\s*(?:\(@{name}\))?\s*[:：])\s*",
+            "",
+            text,
+            count=1,
+        )
+
+    def _strip_speaker_prefix_from_messages(self, messages: list) -> list:
+        labels = self._roster_speaker_labels()
+        if not labels:
+            return messages
+        cleaned = []
+        for message in messages or []:
+            if message.get("role") != "assistant":
+                cleaned.append(message)
+                continue
+            content = message.get("content")
+            if isinstance(content, list) and content and content[0].get("type") == "text":
+                text = self._strip_speaker_prefix(content[0].get("text", ""), labels)
+                cleaned.append({
+                    **message,
+                    "content": [{**content[0], "text": text}, *content[1:]],
+                })
+            elif isinstance(content, str):
+                cleaned.append({
+                    **message,
+                    "content": self._strip_speaker_prefix(content, labels),
+                })
+            else:
+                cleaned.append(message)
+        return cleaned
+
     def _begin_run(self, session_id: str, agent_id: str, context: Context = None):
         """Open a run for this turn and make its id the ambient one.
 
@@ -943,6 +1004,27 @@ class AgentBridge:
                 owns_conversation=resolved_agent_id == host_id,
             )
             return agent
+
+    def _sync_shared_transcript(self, agent, session_id: str, host_agent_id: str) -> None:
+        """Reload the host's transcript so every teammate sees the same history.
+
+        Solo conversations keep their live in-memory list (including tool
+        chains). A team conversation is reread from the host store, with
+        colleagues' replies replayed as ``Name：`` user turns so ``assistant``
+        stays this speaker's own voice.
+        """
+        if not session_id or not AgentInitializer._is_shared_conversation(
+            session_id, host_agent_id
+        ):
+            return
+        restore = getattr(self.initializer, "_restore_conversation_history", None)
+        if restore is None:
+            return
+        try:
+            host = self.agent_registry.get(host_agent_id, require_enabled=False)
+        except Exception:
+            return
+        restore(agent, session_id, host.workspace, host_agent_id)
 
     def _apply_session_project(self, agent, session_id: str, agent_id: str) -> None:
         """Retarget the agent's working directory to the session's project dir.
@@ -1186,6 +1268,13 @@ class AgentBridge:
             )
             if not agent:
                 return Reply(ReplyType.ERROR, "Failed to initialize super agent")
+
+            # A team conversation is one transcript. Each Agent caches its own
+            # in-memory list and only restores it on first init, so a teammate
+            # that already joined would miss later turns spoken by someone else
+            # (and the host would miss guest replies). Reload the shared
+            # transcript with author labels before this turn is appended.
+            self._sync_shared_transcript(agent, session_id, resolved_agent_id)
             
             # Create event handler for logging and channel communication
             event_handler = AgentEventHandler(context=context, original_callback=on_event)
@@ -1326,6 +1415,7 @@ class AgentBridge:
                 new_messages = self._attribute_to_speaker(
                     new_messages, speaker_agent_id
                 )
+                new_messages = self._strip_speaker_prefix_from_messages(new_messages)
                 if new_messages:
                     self._persist_messages(
                         session_id,
@@ -1360,6 +1450,11 @@ class AgentBridge:
             # background. Off the critical path so user latency is unaffected;
             # changes take effect on the user's next message.
             self._schedule_mcp_hot_reload(agent)
+
+            if isinstance(response, str):
+                response = self._strip_speaker_prefix(
+                    response, self._roster_speaker_labels()
+                )
 
             # Check if there are files to send (from send/read tool)
             if hasattr(agent, 'stream_executor') and hasattr(agent.stream_executor, 'files_to_send'):
