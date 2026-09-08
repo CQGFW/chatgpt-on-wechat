@@ -236,8 +236,14 @@ const ModelsTab: React.FC<ModelsTabProps> = ({ baseUrl }) => {
         onSaveStrategy={(strategy, provider) =>
           run('search', { action: 'set_capability', capability: 'search', strategy, provider })
         }
-        onSaveSearchKey={(provider, key, anonymous) =>
-          run('search_key', { action: 'set_search_credential', provider, api_key: key, anonymous })
+        onSaveSearchKey={(provider, value, anonymous) =>
+          run(
+            'search_key',
+            provider === 'searxng'
+              ? // SearXNG persists an instance URL, not an API key.
+                { action: 'set_search_credential', provider, url: value }
+              : { action: 'set_search_credential', provider, api_key: value, anonymous }
+          )
         }
         keyStatus={statusMap.search_key}
         keyBusy={busy === 'search_key'}
@@ -793,10 +799,11 @@ const EmbeddingCard: React.FC<{
 )
 
 // Search providers that own a dedicated credential (as opposed to reusing a
-// model-vendor key). AnySearch additionally supports an anonymous tier, so it
+// model-vendor key): a dedicated API key, or — for SearXNG — a self-hosted
+// instance URL. AnySearch additionally supports an anonymous tier, so it
 // counts as "configured" even without a key. Mirrors the web console flow.
 const isDedicatedKeyProvider = (p: SearchProviderMeta): boolean =>
-  p.needs_dedicated_key || ['bocha', 'anysearch', 'serply'].includes(p.id)
+  p.needs_dedicated_key || p.needs_url || ['bocha', 'anysearch', 'serply', 'tavily', 'searxng'].includes(p.id)
 
 const SearchCard: React.FC<{
   state: SearchCapabilityState
@@ -945,27 +952,31 @@ const SearchCard: React.FC<{
   )
 }
 
-// Dedicated-key editor for a single search provider. AnySearch adds an
-// anonymous option: saving with an empty key enables the anonymous tier.
+// Dedicated-credential editor for a single search provider. Most providers
+// hold an API key; SearXNG holds a self-hosted instance URL (echoed back
+// verbatim, not masked). AnySearch adds an anonymous option: saving with an
+// empty key enables the anonymous tier.
 const SearchKeyModal: React.FC<{
   provider: SearchProviderMeta | null
   busy: boolean
   status?: string
   onClose: () => void
-  onSave: (key: string, anonymous: boolean) => void
+  onSave: (value: string, anonymous: boolean) => void
 }> = ({ provider, busy, onClose, onSave }) => {
   const open = !!provider
-  const masked = provider?.api_key_masked || ''
   const isAnysearch = provider?.id === 'anysearch'
-  const [key, setKey] = useState('')
+  const isSearxng = provider?.id === 'searxng' || !!provider?.needs_url
+  // SearXNG prefills its plain instance URL; others prefill the masked key.
+  const initial = isSearxng ? provider?.url_masked || '' : provider?.api_key_masked || ''
+  const [value, setValue] = useState('')
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setKey(masked)
+      setValue(initial)
       setDirty(false)
     }
-  }, [open, masked])
+  }, [open, initial])
 
   if (!provider) return null
 
@@ -973,17 +984,36 @@ const SearchKeyModal: React.FC<{
   const desc = t(`models_search_${provider.id}_desc`)
 
   const handleSave = () => {
+    if (isSearxng) {
+      // URL is plain text (never masked). Empty is a no-op here — use the
+      // configured chip / clear flow to remove it.
+      const trimmed = value.trim()
+      if (!dirty || !trimmed) {
+        onClose()
+        return
+      }
+      onSave(trimmed, false)
+      return
+    }
     // Kept the masked placeholder untouched -> nothing to persist.
-    if (!dirty || MASK_RE.test(key)) {
+    if (!dirty || MASK_RE.test(value)) {
       // AnySearch: an untouched-but-empty field still means "anonymous".
-      if (isAnysearch && !masked) onSave('', true)
+      if (isAnysearch && !initial) onSave('', true)
       else onClose()
       return
     }
-    const trimmed = key.trim()
+    const trimmed = value.trim()
     // AnySearch: empty key = enable anonymous mode.
     onSave(trimmed, isAnysearch && !trimmed)
   }
+
+  const fieldLabel = isSearxng ? t('models_search_instance_url') : 'API Key'
+  const fieldHint = isSearxng
+    ? undefined
+    : isAnysearch
+      ? t('models_search_anysearch_anon_hint')
+      : undefined
+  const placeholder = isSearxng ? 'https://searxng.example.com' : 'sk-...'
 
   return (
     <Modal
@@ -1002,19 +1032,17 @@ const SearchKeyModal: React.FC<{
       }
     >
       <p className="text-xs text-content-tertiary mb-3">{desc}</p>
-      <Field
-        label="API Key"
-        hint={isAnysearch ? t('models_search_anysearch_anon_hint') : undefined}
-      >
+      <Field label={fieldLabel} hint={fieldHint}>
         <TextInput
-          className="font-mono"
-          value={key}
-          placeholder="sk-..."
+          className={isSearxng ? '' : 'font-mono'}
+          value={value}
+          placeholder={placeholder}
           onFocus={() => {
-            if (!dirty && MASK_RE.test(key)) setKey('')
+            // Only API keys use a masked sentinel; URLs stay as-is.
+            if (!isSearxng && !dirty && MASK_RE.test(value)) setValue('')
           }}
           onChange={(e) => {
-            setKey(e.target.value)
+            setValue(e.target.value)
             setDirty(true)
           }}
         />

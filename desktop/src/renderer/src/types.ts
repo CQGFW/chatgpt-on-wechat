@@ -600,6 +600,11 @@ export interface SearchProviderMeta {
   // AnySearch can be "configured" via anonymous mode (no key). The backend
   // sets this flag so the UI can badge it and offer the anonymous opt-in.
   anonymous?: boolean
+  // SearXNG holds a self-hosted instance URL instead of an API key. When
+  // needs_url is set the editor shows a URL field; url_masked echoes the saved
+  // URL (not a secret, so returned verbatim) for prefill/edit.
+  needs_url?: boolean
+  url_masked?: string
 }
 
 export interface CapabilityState {
@@ -685,10 +690,11 @@ export type ModelsAction =
   // is accepted here alongside its opt-in fields.
   | { action: 'set_capability'; capability: CapabilityKey | 'chat_fallback'; provider_id?: string; model?: string; voice?: string; strategy?: string; provider?: string; enabled?: boolean; max_switches?: number }
   | { action: 'set_voice_reply_mode'; mode: 'off' | 'voice_if_voice' | 'always' }
-  // Dedicated search-provider credentials (bocha / anysearch / serply). The
-  // provider field defaults to bocha server-side when omitted; anonymous is
-  // AnySearch-only (save with an empty key to enable the anonymous tier).
-  | { action: 'set_search_credential'; provider?: string; api_key: string; anonymous?: boolean }
+  // Dedicated search-provider credentials (bocha / anysearch / serply / tavily
+  // use api_key; searxng uses url). The provider field defaults to bocha
+  // server-side when omitted; anonymous is AnySearch-only (save with an empty
+  // key to enable the anonymous tier).
+  | { action: 'set_search_credential'; provider?: string; api_key?: string; url?: string; anonymous?: boolean }
 
 // ============================================================
 // Channels
