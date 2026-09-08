@@ -597,6 +597,9 @@ export interface SearchProviderMeta {
   configured: boolean
   needs_dedicated_key: boolean
   api_key_masked?: string
+  // AnySearch can be "configured" via anonymous mode (no key). The backend
+  // sets this flag so the UI can badge it and offer the anonymous opt-in.
+  anonymous?: boolean
 }
 
 export interface CapabilityState {
@@ -682,7 +685,10 @@ export type ModelsAction =
   // is accepted here alongside its opt-in fields.
   | { action: 'set_capability'; capability: CapabilityKey | 'chat_fallback'; provider_id?: string; model?: string; voice?: string; strategy?: string; provider?: string; enabled?: boolean; max_switches?: number }
   | { action: 'set_voice_reply_mode'; mode: 'off' | 'voice_if_voice' | 'always' }
-  | { action: 'set_search_credential'; api_key: string }
+  // Dedicated search-provider credentials (bocha / anysearch / serply). The
+  // provider field defaults to bocha server-side when omitted; anonymous is
+  // AnySearch-only (save with an empty key to enable the anonymous tier).
+  | { action: 'set_search_credential'; provider?: string; api_key: string; anonymous?: boolean }
 
 // ============================================================
 // Channels

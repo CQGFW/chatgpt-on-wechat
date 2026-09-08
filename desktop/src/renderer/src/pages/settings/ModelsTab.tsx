@@ -22,6 +22,7 @@ import type {
   ModelsData,
   ModelProvider,
   SearchCapabilityState,
+  SearchProviderMeta,
 } from '../../types'
 import { Card, Field, Dropdown, TextInput, Modal, Btn, MASK_RE } from './primitives'
 import CapabilityCard from './CapabilityCard'
@@ -235,7 +236,9 @@ const ModelsTab: React.FC<ModelsTabProps> = ({ baseUrl }) => {
         onSaveStrategy={(strategy, provider) =>
           run('search', { action: 'set_capability', capability: 'search', strategy, provider })
         }
-        onSaveBochaKey={(key) => run('search_key', { action: 'set_search_credential', api_key: key })}
+        onSaveSearchKey={(provider, key, anonymous) =>
+          run('search_key', { action: 'set_search_credential', provider, api_key: key, anonymous })
+        }
         keyStatus={statusMap.search_key}
         keyBusy={busy === 'search_key'}
       />
@@ -789,24 +792,49 @@ const EmbeddingCard: React.FC<{
   </CapabilityCard>
 )
 
+// Search providers that own a dedicated credential (as opposed to reusing a
+// model-vendor key). AnySearch additionally supports an anonymous tier, so it
+// counts as "configured" even without a key. Mirrors the web console flow.
+const isDedicatedKeyProvider = (p: SearchProviderMeta): boolean =>
+  p.needs_dedicated_key || ['bocha', 'anysearch', 'serply'].includes(p.id)
+
 const SearchCard: React.FC<{
   state: SearchCapabilityState
   busy: boolean
   status?: string
   onSaveStrategy: (strategy: string, provider: string) => void
-  onSaveBochaKey: (key: string) => void
+  onSaveSearchKey: (provider: string, key: string, anonymous: boolean) => void
   keyStatus?: string
   keyBusy: boolean
-}> = ({ state, busy, status, onSaveStrategy, onSaveBochaKey, keyStatus, keyBusy }) => {
+}> = ({ state, busy, status, onSaveStrategy, onSaveSearchKey, keyStatus, keyBusy }) => {
   const [strategy, setStrategy] = useState<string>(state.strategy || 'auto')
   const [provider, setProvider] = useState<string>(state.fixed_provider || state.current_provider || '')
-  const [bochaOpen, setBochaOpen] = useState(false)
+  // The dedicated-key provider currently open in the credential modal, or null.
+  const [keyProvider, setKeyProvider] = useState<SearchProviderMeta | null>(null)
+  // Two-step add flow: when >1 dedicated provider is unconfigured, first show a
+  // picker; a single unconfigured one opens its editor directly.
+  const [pickerOpen, setPickerOpen] = useState(false)
 
   const providerOptions = useMemo(
     () => state.providers.map((p) => ({ value: p.id, label: localizedLabel(p.label) })),
     [state.providers]
   )
-  const bocha = state.providers.find((p) => p.id === 'bocha')
+
+  // Providers that hold their own key: split into configured (editable chips)
+  // and unconfigured (offered behind the "+ add" entry).
+  const dedicated = useMemo(() => state.providers.filter(isDedicatedKeyProvider), [state.providers])
+  const configured = dedicated.filter((p) => p.configured)
+  const missing = dedicated.filter((p) => !p.configured)
+
+  const openProvider = (p: SearchProviderMeta) => {
+    setPickerOpen(false)
+    setKeyProvider(p)
+  }
+  const onAdd = () => {
+    if (missing.length === 0) return
+    if (missing.length === 1) openProvider(missing[0])
+    else setPickerOpen(true)
+  }
 
   return (
     <Card icon={<SearchIcon size={16} />} title={t('models_cap_search')} subtitle={t('models_cap_search_sub')}>
@@ -831,78 +859,153 @@ const SearchCard: React.FC<{
             />
           </Field>
         )}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => setBochaOpen(true)}
-            className="text-xs text-accent hover:text-accent-hover cursor-pointer inline-flex items-center gap-1"
-          >
-            {t('models_search_bocha_key')}
-            {bocha?.configured && <Check size={12} />}
-          </button>
-          <div className="flex items-center gap-3">
-            <span className={`text-xs text-accent transition-opacity ${status ? 'opacity-100' : 'opacity-0'}`}>
-              {status}
-            </span>
-            <button
-              disabled={busy || (strategy === 'fixed' && !provider)}
-              onClick={() => onSaveStrategy(strategy, provider)}
-              className="px-4 py-2 rounded-btn bg-accent text-accent-contrast hover:bg-accent-hover text-sm font-medium cursor-pointer transition-colors disabled:opacity-50 inline-flex items-center gap-2"
-            >
-              {busy && <Loader2 size={14} className="animate-spin" />}
-              {t('config_save')}
-            </button>
+
+        {/* Dedicated-key providers: configured chips (click to edit) + add entry. */}
+        <Field label={t('models_search_bocha_key')}>
+          <div className="flex items-center flex-wrap gap-2">
+            {configured.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => openProvider(p)}
+                title={t('models_search_edit_hint')}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-xs bg-accent-soft text-accent hover:opacity-80 cursor-pointer transition-opacity"
+              >
+                <Check size={12} />
+                {localizedLabel(p.label)}
+                {p.anonymous && ` · ${t('models_search_anonymous_badge')}`}
+              </button>
+            ))}
+            {missing.length > 0 && (
+              <button
+                onClick={onAdd}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-btn text-xs border border-dashed border-default text-content-tertiary hover:border-accent hover:text-accent cursor-pointer transition-colors"
+              >
+                <Plus size={12} />
+                {t('models_search_add_provider')}
+              </button>
+            )}
+            {configured.length === 0 && missing.length === 0 && (
+              <span className="text-xs text-content-tertiary">{t('models_search_none_configured')}</span>
+            )}
           </div>
+        </Field>
+
+        <div className="flex items-center justify-end gap-3">
+          <span className={`text-xs text-accent transition-opacity ${status ? 'opacity-100' : 'opacity-0'}`}>
+            {status}
+          </span>
+          <button
+            disabled={busy || (strategy === 'fixed' && !provider)}
+            onClick={() => onSaveStrategy(strategy, provider)}
+            className="px-4 py-2 rounded-btn bg-accent text-accent-contrast hover:bg-accent-hover text-sm font-medium cursor-pointer transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+          >
+            {busy && <Loader2 size={14} className="animate-spin" />}
+            {t('config_save')}
+          </button>
         </div>
       </div>
 
-      <BochaKeyModal
-        open={bochaOpen}
-        masked={bocha?.api_key_masked || ''}
+      {/* Add-provider picker (only when >1 unconfigured dedicated provider). */}
+      <Modal
+        open={pickerOpen}
+        title={t('models_search_add_provider')}
+        onClose={() => setPickerOpen(false)}
+        footer={
+          <Btn variant="ghost" onClick={() => setPickerOpen(false)}>
+            {t('config_cancel')}
+          </Btn>
+        }
+      >
+        <p className="text-xs text-content-tertiary mb-3">{t('models_search_add_desc')}</p>
+        <div className="space-y-2">
+          {missing.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => openProvider(p)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-btn bg-inset-2 hover:bg-surface-2 text-sm text-content cursor-pointer transition-colors"
+            >
+              <span>{localizedLabel(p.label)}</span>
+              <ExternalLink size={12} className="text-content-tertiary" />
+            </button>
+          ))}
+        </div>
+      </Modal>
+
+      <SearchKeyModal
+        provider={keyProvider}
         busy={keyBusy}
         status={keyStatus}
-        onClose={() => setBochaOpen(false)}
-        onSave={(k) => {
-          onSaveBochaKey(k)
-          setBochaOpen(false)
+        onClose={() => setKeyProvider(null)}
+        onSave={(key, anonymous) => {
+          if (keyProvider) onSaveSearchKey(keyProvider.id, key, anonymous)
+          setKeyProvider(null)
         }}
       />
     </Card>
   )
 }
 
-const BochaKeyModal: React.FC<{
-  open: boolean
-  masked: string
+// Dedicated-key editor for a single search provider. AnySearch adds an
+// anonymous option: saving with an empty key enables the anonymous tier.
+const SearchKeyModal: React.FC<{
+  provider: SearchProviderMeta | null
   busy: boolean
   status?: string
   onClose: () => void
-  onSave: (key: string) => void
-}> = ({ open, masked, busy, onClose, onSave }) => {
+  onSave: (key: string, anonymous: boolean) => void
+}> = ({ provider, busy, onClose, onSave }) => {
+  const open = !!provider
+  const masked = provider?.api_key_masked || ''
+  const isAnysearch = provider?.id === 'anysearch'
   const [key, setKey] = useState('')
   const [dirty, setDirty] = useState(false)
+
   useEffect(() => {
     if (open) {
       setKey(masked)
       setDirty(false)
     }
   }, [open, masked])
+
+  if (!provider) return null
+
+  const title = t(`models_search_${provider.id}_title`)
+  const desc = t(`models_search_${provider.id}_desc`)
+
+  const handleSave = () => {
+    // Kept the masked placeholder untouched -> nothing to persist.
+    if (!dirty || MASK_RE.test(key)) {
+      // AnySearch: an untouched-but-empty field still means "anonymous".
+      if (isAnysearch && !masked) onSave('', true)
+      else onClose()
+      return
+    }
+    const trimmed = key.trim()
+    // AnySearch: empty key = enable anonymous mode.
+    onSave(trimmed, isAnysearch && !trimmed)
+  }
+
   return (
     <Modal
       open={open}
-      title={t('models_search_bocha_key')}
+      title={title}
       onClose={onClose}
       footer={
         <>
           <Btn variant="ghost" onClick={onClose}>
             {t('config_cancel')}
           </Btn>
-          <Btn variant="primary" disabled={busy} onClick={() => onSave(dirty && !MASK_RE.test(key) ? key : '')}>
+          <Btn variant="primary" disabled={busy} onClick={handleSave}>
             {busy ? <Loader2 size={14} className="animate-spin" /> : t('config_save')}
           </Btn>
         </>
       }
     >
-      <Field label="Bocha API Key" hint={t('models_search_bocha_hint')}>
+      <p className="text-xs text-content-tertiary mb-3">{desc}</p>
+      <Field
+        label="API Key"
+        hint={isAnysearch ? t('models_search_anysearch_anon_hint') : undefined}
+      >
         <TextInput
           className="font-mono"
           value={key}
