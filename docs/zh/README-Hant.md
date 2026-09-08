@@ -116,9 +116,7 @@ cow install-browser                # 安裝瀏覽器工具
 
 ## 👥 多智能體團隊
 
-創建多個 Agent 組成團隊，每個成員擁有獨立的職責、模型、技能與知識，工作空間、記憶與會話相互隔離，既能專注各自領域，也能被拉進同一個會話協作完成複雜任務。
-
-多個 Agent 可以在一個群聊裡分工，主 Agent 負責接收任務並按職責委派給合適的成員。同一類型通道也能執行多個實例，分別綁定不同的 Agent 或整支團隊，對外呈現為多個獨立助手。
+支援創建多個 Agent 組成團隊，每個成員擁有獨立的記憶、能力、知識與工作空間，既能專注各自領域，也能在同一會話中透過協作完成複雜任務。多 Agent 團隊支援在 Web 端、桌面客戶端、IM 通道接入端使用。
 
 <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/zh/agent-team-overview.png" alt="CowAgent 多智能體團隊" width="800"/>
 

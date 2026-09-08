@@ -116,9 +116,7 @@ cow install-browser                # install browser automation
 
 ## 👥 Multi-Agent Team
 
-Create a team of Agents, each with its own role, model, skills, and knowledge. Their workspaces, memory, and sessions are isolated, so each can focus on its own domain while still being pulled into a shared conversation to tackle complex tasks together.
-
-Several Agents can divide the work within a group chat, where a lead Agent receives the task and delegates it to the right member by role. The same channel type can also run multiple instances, each bound to a different Agent or an entire team, appearing as separate assistants to the outside.
+Create a team of Agents, each with its own memory, capabilities, knowledge, and workspace. Each can focus on its own domain, or collaborate within a shared conversation to tackle complex tasks together. Multi-Agent teams are available on the Web, the desktop client, and IM channel integrations.
 
 <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-team-overview.png" alt="CowAgent Multi-Agent Team" width="800"/>
 
