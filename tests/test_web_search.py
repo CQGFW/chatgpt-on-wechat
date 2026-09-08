@@ -8,8 +8,9 @@ provider fallback order, result normalization into the unified output shape,
 the AnySearch-specific count clamp (the shared tool schema allows 1-50 while
 the API accepts 1-10), HTTP and business-level error mapping, and the
 anonymous mode contract (no Authorization header without a key), and the
-keyless contract of Keenable (always configured; public endpoint plus the
-``X-Keenable-Title`` header without a key, ``X-API-Key`` with one).
+keyless contract of Keenable (opt-in via ``keenable_anonymous``, mirroring
+``anysearch_anonymous``; public endpoint plus the ``X-Keenable-Title`` header
+without a key, ``X-API-Key`` with one).
 
 No real network is used: ``requests.post`` / ``requests.get`` are stubbed
 throughout.
@@ -80,15 +81,14 @@ class TestAnySearchKeyResolution(unittest.TestCase):
 
 class TestProviderOrder(unittest.TestCase):
     """New providers are appended after the four originals, leaving existing
-    routing untouched: anysearch, then serply, then keenable (keyless, so it
-    must come after every provider the user may have paid for)."""
+    routing untouched: anysearch, then serply, then keenable (its keyless
+    tier must come after every provider the user may have paid for)."""
 
     def test_provider_order_appends_new_providers_last(self):
         self.assertEqual(
             web_search_module.PROVIDER_ORDER,
             ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "keenable"),
         )
-        self.assertEqual(web_search_module.KEYLESS_PROVIDERS, ("keenable",))
 
     def test_web_console_provider_list_stays_in_sync(self):
         """The web console keeps its own copy of the provider order plus the
@@ -108,27 +108,40 @@ class TestProviderOrder(unittest.TestCase):
         with patch.dict(os.environ, {"SERPLY_API_KEY": ""}):
             self.assertEqual(ModelsHandler._search_provider_key("serply", {}), "")
 
-        self.assertEqual(ModelsHandler._KEYLESS_SEARCH_PROVIDERS, web_search_module.KEYLESS_PROVIDERS)
         cfg = {"tools": {"web_search": {"keenable_api_key": "console-key"}}}
         self.assertEqual(ModelsHandler._search_provider_key("keenable", cfg), "console-key")
         with patch.dict(os.environ, {"KEENABLE_API_KEY": "env-key"}):
             self.assertEqual(ModelsHandler._search_provider_key("keenable", {}), "env-key")
 
-    def test_web_console_marks_keyless_provider_configured(self):
-        """With no credential anywhere the Search panel still shows keenable
-        as configured (and as the active backend), so the console agrees
-        with the tool about what a fresh install can do."""
+    def test_web_console_mirrors_keenable_opt_in(self):
+        """The Search panel agrees with the tool: keenable is not configured
+        on a fresh install, shows as configured and badged anonymous once
+        keenable_anonymous is on, and as configured (no badge) with a key."""
         from channel.web.web_channel import ModelsHandler
 
-        env = {k: "" for k in _ALL_SEARCH_ENV}
-        with patch.dict(os.environ, env):
-            cap = ModelsHandler._search_capability({})
-        by_id = {p["id"]: p for p in cap["providers"]}
-        self.assertTrue(by_id["keenable"]["configured"])
-        self.assertTrue(by_id["keenable"]["needs_dedicated_key"])
-        self.assertEqual(by_id["keenable"]["api_key_masked"], "")
-        self.assertFalse(by_id["serply"]["configured"])
-        self.assertEqual(cap["current_provider"], "keenable")
+        with patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            fresh = ModelsHandler._search_capability({})
+            anon = ModelsHandler._search_capability(
+                {"tools": {"web_search": {"keenable_anonymous": True}}})
+            keyed = ModelsHandler._search_capability(
+                {"tools": {"web_search": {"keenable_api_key": "sk-test-key"}}})
+
+        fresh_k = {p["id"]: p for p in fresh["providers"]}["keenable"]
+        self.assertFalse(fresh_k["configured"])
+        self.assertFalse(fresh_k["anonymous"])
+        self.assertTrue(fresh_k["needs_dedicated_key"])
+        self.assertNotEqual(fresh["current_provider"], "keenable")
+
+        anon_k = {p["id"]: p for p in anon["providers"]}["keenable"]
+        self.assertTrue(anon_k["configured"])
+        self.assertTrue(anon_k["anonymous"])
+        self.assertEqual(anon_k["api_key_masked"], "")
+        self.assertEqual(anon["current_provider"], "keenable")
+
+        keyed_k = {p["id"]: p for p in keyed["providers"]}["keenable"]
+        self.assertTrue(keyed_k["configured"])
+        self.assertFalse(keyed_k["anonymous"])
+        self.assertNotEqual(keyed_k["api_key_masked"], "")
 
 
 _ALL_SEARCH_ENV = (
@@ -137,25 +150,76 @@ _ALL_SEARCH_ENV = (
 )
 
 
-class TestKeylessAvailability(unittest.TestCase):
-    """Keenable needs no key, so the tool is registered on a fresh install and
-    keenable is what a keyless install resolves to. A configured provider
+class TestKeenableOptIn(unittest.TestCase):
+    """Keenable's keyless tier is opt-in, mirroring anysearch_anonymous: a
+    fresh install configures nothing and the tool is not registered; with
+    keenable_anonymous (or a key) keenable is configured. A keyed provider
     still wins because keenable sits last in PROVIDER_ORDER."""
 
-    def test_no_keys_still_configures_keenable(self):
+    def test_fresh_install_leaves_keenable_unconfigured(self):
         with patch.object(web_search_module, "conf", lambda: {}), \
+                patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            self.assertEqual(web_search_module.configured_providers(), [])
+            self.assertFalse(web_search_module.WebSearch.is_available())
+            self.assertFalse(web_search_module.WebSearch()._resolve_provider(None))
+
+    def test_anysearch_opt_in_does_not_enable_keenable(self):
+        cfg = {"tools": {"web_search": {"anysearch_anonymous": True}}}
+        with patch.object(web_search_module, "conf", lambda: cfg), \
+                patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            self.assertEqual(web_search_module.configured_providers(), ["anysearch"])
+
+    def test_anonymous_opt_in_configures_keenable(self):
+        cfg = {"tools": {"web_search": {"keenable_anonymous": True}}}
+        with patch.object(web_search_module, "conf", lambda: cfg), \
                 patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
             self.assertEqual(web_search_module.configured_providers(), ["keenable"])
             self.assertTrue(web_search_module.WebSearch.is_available())
             self.assertEqual(web_search_module.WebSearch()._resolve_provider(None), "keenable")
 
+    def test_key_configures_keenable_without_opt_in(self):
+        cfg = {"tools": {"web_search": {"keenable_api_key": "sk-test"}}}
+        with patch.object(web_search_module, "conf", lambda: cfg), \
+                patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
+            self.assertEqual(web_search_module.configured_providers(), ["keenable"])
+            self.assertTrue(web_search_module.WebSearch.is_available())
+
     def test_keyed_provider_wins_over_keenable(self):
-        cfg = {"tools": {"web_search": {"serply_api_key": "k"}}}
+        cfg = {"tools": {"web_search": {"serply_api_key": "k", "keenable_anonymous": True}}}
         with patch.object(web_search_module, "conf", lambda: cfg), \
                 patch.dict(os.environ, {k: "" for k in _ALL_SEARCH_ENV}):
             self.assertEqual(web_search_module.configured_providers(), ["serply", "keenable"])
             self.assertEqual(web_search_module.WebSearch()._resolve_provider(None), "serply")
             self.assertEqual(web_search_module.WebSearch()._resolve_provider("keenable"), "keenable")
+
+
+class TestConsoleSearchCredential(unittest.TestCase):
+    """The console's save path writes keenable_anonymous the same way it does
+    anysearch_anonymous: an empty key with anonymous=true turns the tier on,
+    a real key turns it off, and clearing the key turns it off again."""
+
+    def _save(self, payload):
+        from channel.web.web_channel import ModelsHandler
+
+        with patch("channel.web.web_channel.conf", return_value={}), \
+                patch.object(ModelsHandler, "_read_file_config", return_value={}), \
+                patch.object(ModelsHandler, "_write_file_config") as write:
+            out = json.loads(ModelsHandler()._handle_set_search_credential(payload))
+        self.assertEqual(out["status"], "success")
+        write.assert_called_once()
+        return write.call_args[0][0]["tools"]["web_search"]
+
+    def test_empty_key_with_anonymous_enables_keenable(self):
+        ws = self._save({"provider": "keenable", "api_key": "", "anonymous": True})
+        self.assertEqual(ws, {"keenable_api_key": "", "keenable_anonymous": True})
+
+    def test_key_disables_anonymous(self):
+        ws = self._save({"provider": "keenable", "api_key": "sk-test", "anonymous": True})
+        self.assertEqual(ws, {"keenable_api_key": "sk-test", "keenable_anonymous": False})
+
+    def test_clear_disables_anonymous(self):
+        ws = self._save({"provider": "keenable", "api_key": ""})
+        self.assertEqual(ws, {"keenable_api_key": "", "keenable_anonymous": False})
 
 
 class TestAnySearchBackend(unittest.TestCase):

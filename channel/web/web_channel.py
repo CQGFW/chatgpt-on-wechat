@@ -4230,10 +4230,6 @@ class ModelsHandler:
     # agent/tools/web_search/web_search.py — keep them in sync.
     _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "keenable")
 
-    # Providers that work without a key (mirrors KEYLESS_PROVIDERS in the
-    # tool module). They show as configured even with no credential.
-    _KEYLESS_SEARCH_PROVIDERS = ("keenable",)
-
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
         "zhipu":   {"zh": "智谱", "en": "GLM"},
@@ -4286,6 +4282,7 @@ class ModelsHandler:
             ws_cfg = {}
 
         anonymous_on = bool(ws_cfg.get("anysearch_anonymous"))
+        keenable_anonymous_on = bool(ws_cfg.get("keenable_anonymous"))
         providers = []
         configured_ids = []
         for pid in cls._SEARCH_PROVIDERS:
@@ -4293,8 +4290,11 @@ class ModelsHandler:
             if pid == "anysearch":
                 # AnySearch: real key, or an explicit anonymous opt-in.
                 ok = cls._is_real_key(raw_key) or anonymous_on
+            elif pid == "keenable":
+                # Keenable: real key, or an explicit anonymous opt-in.
+                ok = cls._is_real_key(raw_key) or keenable_anonymous_on
             else:
-                ok = cls._is_real_key(raw_key) or pid in cls._KEYLESS_SEARCH_PROVIDERS
+                ok = cls._is_real_key(raw_key)
             providers.append({
                 "id": pid,
                 "label": cls._SEARCH_PROVIDER_LABELS.get(pid, pid),
@@ -4303,7 +4303,7 @@ class ModelsHandler:
                 # piggy-back on a model-vendor credential. Frontend uses
                 # this hint to decide which credential editor to surface.
                 # Lets the frontend badge "匿名/anonymous" only in anonymous mode.
-                "anonymous": pid == "anysearch" and ok and not raw_key,
+                "anonymous": pid in ("anysearch", "keenable") and ok and not raw_key,
                 "needs_dedicated_key": pid in ("bocha", "anysearch", "serply", "keenable"),
                 "api_key_masked": ConfigHandler._mask_key(raw_key) if raw_key else "",
             })
@@ -5247,33 +5247,36 @@ class ModelsHandler:
     def _handle_set_search_credential(self, data: dict) -> str:
         """Persist a dedicated search-provider key under tools.web_search.
 
-        bocha, anysearch, serply and keenable own their keys here (keenable's
-        is optional); zhipu/qianfan/linkai reuse model-vendor credentials and
-        go through set_provider instead.
+        bocha, anysearch, serply and keenable own their keys here; anysearch
+        and keenable also take an ``anonymous`` flag that, with an empty key,
+        turns on their keyless tier (``<provider>_anonymous``). zhipu/qianfan/
+        linkai reuse model-vendor credentials and go through set_provider
+        instead.
         """
         provider = (data.get("provider") or "bocha").strip().lower()
         if provider not in ("bocha", "anysearch", "serply", "keenable"):
             return json.dumps({"status": "error", "message": f"unsupported search provider: {provider!r}"})
 
-        if provider == "anysearch":
+        if provider in ("anysearch", "keenable"):
             anonymous = data.get("anonymous", False)
 
             api_key = (data.get("api_key") or "").strip() if isinstance(data.get("api_key"), str) else ""
+            key_field = f"{provider}_api_key"
+            anonymous_field = f"{provider}_anonymous"
+            anonymous_on = bool(anonymous and not api_key)
 
             local_config = conf()
             file_cfg = self._read_file_config()
 
-            self._set_nested_namespace_value(local_config, "tools", "web_search", "anysearch_api_key", api_key)
-            self._set_nested_namespace_value(file_cfg, "tools", "web_search", "anysearch_api_key", api_key)
+            self._set_nested_namespace_value(local_config, "tools", "web_search", key_field, api_key)
+            self._set_nested_namespace_value(file_cfg, "tools", "web_search", key_field, api_key)
 
-            self._set_nested_namespace_value(local_config, "tools", "web_search", "anysearch_anonymous",
-                                             bool(anonymous and not api_key))
-            self._set_nested_namespace_value(file_cfg, "tools", "web_search", "anysearch_anonymous",
-                                             bool(anonymous and not api_key))
+            self._set_nested_namespace_value(local_config, "tools", "web_search", anonymous_field, anonymous_on)
+            self._set_nested_namespace_value(file_cfg, "tools", "web_search", anonymous_field, anonymous_on)
 
             self._write_file_config(file_cfg)
             logger.info(
-                f"[ModelsHandler] search credential set: anysearch_api_key={'***' if api_key else ''}, anonymous={bool(anonymous and not api_key)}")
+                f"[ModelsHandler] search credential set: {key_field}={'***' if api_key else ''}, {anonymous_field}={anonymous_on}")
             return json.dumps({"status": "success", "provider": provider})
         else:
             key_field = f"{provider}_api_key"

@@ -3,7 +3,7 @@ title: web_search - Web 検索
 description: インターネットからリアルタイム情報を検索。複数の検索プロバイダーに対応
 ---
 
-インターネットからリアルタイム情報、ニュース、リサーチなどを検索します。Bocha、百度 Qianfan、智谱（Zhipu）、LinkAI、AnySearch、Serply、Keenable の 7 つのバックエンドに対応しています。Keenable は API Key なしで利用できるため、このツールは初期状態から使えます。その他のプロバイダーは認証情報を設定すると利用可能になります。
+インターネットからリアルタイム情報、ニュース、リサーチなどを検索します。Bocha、百度 Qianfan、智谱（Zhipu）、LinkAI、AnySearch、Serply、Keenable の 7 つのバックエンドに対応しています。Keenable には明示的に有効化する匿名モード（API Key 不要）もあります。各プロバイダーは認証情報（または匿名モードのオプトイン）を設定すると利用可能になります。
 
 <Tip>
   [Web コンソール](/ja/channels/web) の「モデル管理 → 検索」パネルから、プロバイダーと戦略を可視化して設定するのが推奨です。設定ファイルを手動で編集する必要はありません。
@@ -19,9 +19,9 @@ description: インターネットからリアルタイム情報を検索。複�
 | LinkAI | `linkai_api_key` を再利用 | [LinkAI コンソール](https://link-ai.tech/console/interface) |
 | AnySearch | オプション設定 `tools.web_search.anysearch_api_key`（匿名モード対応） | [AnySearch Open Platform](https://anysearch.com/) |
 | Serply | `tools.web_search.serply_api_key` | [Serply](https://serply.io)（[ドキュメント](https://serply.io/docs)） |
-| Keenable | `tools.web_search.keenable_api_key`（任意、レート制限の緩和用） | [Keenable](https://keenable.ai) |
+| Keenable | オプション設定 `tools.web_search.keenable_api_key`、または `keenable_anonymous: true` で Key なし利用 | [Keenable](https://keenable.ai) |
 
-Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearch_api_key / serply_api_key）を別途設定する必要がありますが、その他の3社は対応するモデルのAPIキーをそのまま流用でき、モデルを設定すれば同時に検索機能も利用可能になります。Keenable は API Key 不要です。デフォルトでは IP 単位のレート制限（10 リクエスト/秒、1000 リクエスト/時）がある公開エンドポイントを呼び出し、任意の `keenable_api_key`（または `KEENABLE_API_KEY`）を設定すると制限が解除されます。
+Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearch_api_key / serply_api_key）を別途設定する必要がありますが、その他の3社は対応するモデルのAPIキーをそのまま流用でき、モデルを設定すれば同時に検索機能も利用可能になります。Keenable はオプトイン方式です。`tools.web_search.keenable_anonymous` を `true` に設定（またはコンソールの「検索」パネルで Key を空のまま保存）すると、IP 単位のレート制限（10 リクエスト/秒、1000 リクエスト/時）がある公開エンドポイントを呼び出します。任意の `keenable_api_key`（または `KEENABLE_API_KEY`）を設定すると制限が解除され、オプトインは不要です。
 
 ## ルーティング戦略
 
@@ -51,5 +51,5 @@ Bocha、AnySearch、Serplyについては専用キー（bocha_api_key / anysearc
 | `provider` | string | いいえ | `auto` 戦略で複数プロバイダーを設定している場合に表示。単回のプロバイダー切り替えに使用 |
 
 <Note>
-  Keenable は常に利用可能なため、このツールは常に Agent に登録されます。他の認証情報が未設定の場合、すべての検索は Keenable の Key 不要エンドポイントを経由します。
+  7 社のプロバイダーがいずれも未設定（Key も匿名モードのオプトインもない）の場合、このツールは Agent に登録されません。
 </Note>

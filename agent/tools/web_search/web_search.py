@@ -5,12 +5,13 @@
   - linkai  (https://link-ai.tech, fallback)
   - anysearch (https://anysearch.com)
   - serply  (https://serply.io, Google/Bing SERP API)
-  - keenable (https://keenable.ai, works without an API key)
+  - keenable (https://keenable.ai, keyless tier behind an explicit opt-in)
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
     canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply,
-    keenable]. Keenable needs no key, so it always counts as configured. When
+    keenable]. Keenable counts as configured with a key or with the explicit
+    `keenable_anonymous` opt-in (same contract as `anysearch_anonymous`). When
     the caller passes an explicit `provider` it overrides the pick; an
     invalid/unconfigured one silently falls back to the auto order.
   - strategy 'fixed': use the configured provider; if its credential is
@@ -24,7 +25,8 @@ Credentials
   - anysearch : tools.web_search.anysearch_api_key  -> env ANYSEARCH_API_KEY
   - serply  : tools.web_search.serply_api_key  ->  env SERPLY_API_KEY
   - keenable: tools.web_search.keenable_api_key -> env KEENABLE_API_KEY (optional,
-              only lifts the rate limits of the keyless public endpoint)
+              only lifts the rate limits of the keyless public endpoint);
+              keyless use is opt-in via tools.web_search.keenable_anonymous
 """
 
 import json
@@ -46,12 +48,9 @@ DEFAULT_TIMEOUT = 30
 # zhipu (strong on long-form articles), linkai (cloud aggregator),
 # anysearch, serply (global Google/Bing SERP, last since it isn't
 # benchmarked against the Chinese-market providers above), keenable (global
-# index, needs no key; placed last so any provider the user paid for wins).
+# index, keyless tier behind an explicit opt-in; placed last so any provider
+# the user paid for wins).
 PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "keenable")
-
-# Providers that work without a credential. They always count as configured,
-# so web_search is offered to the agent on a fresh install.
-KEYLESS_PROVIDERS = ("keenable",)
 
 PROVIDER_LABELS = {
     "bocha":   "Bocha",
@@ -104,17 +103,22 @@ def _anysearch_anonymous_enabled() -> bool:
     """Check if AnySearch anonymous mode is enabled via config."""
     return bool(_tools_web_search_conf().get("anysearch_anonymous"))
 
+
+def _keenable_anonymous_enabled() -> bool:
+    """Check if Keenable anonymous (keyless) mode is enabled via config."""
+    return bool(_tools_web_search_conf().get("keenable_anonymous"))
+
 def configured_providers() -> List[str]:
-    """Configured providers in canonical order. anysearch qualifies with a
-    real key OR an explicit anonymous opt-in (still last in fallback order).
-    Keyless providers always qualify; their key is optional."""
+    """Configured providers in canonical order. anysearch and keenable qualify
+    with a real key OR an explicit anonymous opt-in (still last in fallback
+    order); nothing goes keyless unless the user turned it on."""
     result = []
     for p in PROVIDER_ORDER:
         if _get_api_key(p):
             result.append(p)
         elif p == "anysearch" and _anysearch_anonymous_enabled():
             result.append(p)
-        elif p in KEYLESS_PROVIDERS:
+        elif p == "keenable" and _keenable_anonymous_enabled():
             result.append(p)
     return result
 
@@ -149,13 +153,13 @@ class WebSearch(BaseTool):
                     "Time range filter. Options: "
                     "'noLimit' (default), 'oneDay', 'oneWeek', 'oneMonth', 'oneYear', "
                     "or date range like '2025-01-01..2025-02-01'. "
-                    "Honored by bocha/zhipu/qianfan/linkai; ignored by anysearch."
+                    "Honored by bocha/zhipu/qianfan/linkai/keenable; ignored by anysearch."
                 )
             },
             "summary": {
                 "type": "boolean",
                 "description": "Whether to include text summary for each result (default: false). "
-                               "Bocha/linkai only; ignored by anysearch."
+                               "Bocha/linkai/keenable only; ignored by anysearch."
             }
         },
         "required": ["query"]
@@ -166,8 +170,8 @@ class WebSearch(BaseTool):
 
     @staticmethod
     def is_available() -> bool:
-        """Tool is offered to the agent when at least one provider is
-        configured. Keenable needs no key, so in practice this is always true."""
+        """Tool is offered to the agent when at least one provider has a key
+        or an explicit anonymous opt-in (anysearch_anonymous / keenable_anonymous)."""
         return bool(configured_providers())
 
     def get_json_schema(self) -> dict:
@@ -657,8 +661,9 @@ class WebSearch(BaseTool):
         api_key = _get_api_key("keenable")
         # Keenable serves anonymous traffic on a public endpoint that wants an
         # app title instead of a key (rate limited per IP: 10 requests/s,
-        # 1000/hour). A key switches to the authenticated endpoint, which
-        # only lifts those limits.
+        # 1000/hour). Reaching this branch without a key means the user set
+        # keenable_anonymous. A key switches to the authenticated endpoint,
+        # which only lifts those limits.
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
