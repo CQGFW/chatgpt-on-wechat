@@ -4228,7 +4228,7 @@ class ModelsHandler:
 
     # Canonical search provider order. Mirrors PROVIDER_ORDER in
     # agent/tools/web_search/web_search.py — keep them in sync.
-    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng")
+    _SEARCH_PROVIDERS = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "keenable")
 
     _SEARCH_PROVIDER_LABELS = {
         "bocha":   {"zh": "博查", "en": "Bocha"},
@@ -4239,6 +4239,7 @@ class ModelsHandler:
         "serply":  {"zh": "Serply", "en": "Serply"},
         "tavily":  {"zh": "Tavily", "en": "Tavily"},
         "searxng": {"zh": "SearXNG", "en": "SearXNG"},
+        "keenable": {"zh": "Keenable", "en": "Keenable"},
     }
 
     @classmethod
@@ -4269,6 +4270,11 @@ class ModelsHandler:
             block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
             return (block.get("tavily_api_key") if isinstance(block, dict) else "") or os.environ.get(
                 "TAVILY_API_KEY", "")
+        if provider == "keenable":
+            tools_cfg = local_config.get("tools") or {}
+            block = tools_cfg.get("web_search") or {} if isinstance(tools_cfg, dict) else {}
+            return (block.get("keenable_api_key") if isinstance(block, dict) else "") or os.environ.get(
+                "KEENABLE_API_KEY", "")
         # searxng uses an instance URL, not an API key — handled in _search_capability
         return ""
 
@@ -4284,6 +4290,7 @@ class ModelsHandler:
             ws_cfg = {}
 
         anonymous_on = bool(ws_cfg.get("anysearch_anonymous"))
+        keenable_anonymous_on = bool(ws_cfg.get("keenable_anonymous"))
         searxng_url = (ws_cfg.get("searxng_url") or "").strip() if isinstance(ws_cfg, dict) else ""
         providers = []
         configured_ids = []
@@ -4292,6 +4299,9 @@ class ModelsHandler:
             if pid == "anysearch":
                 # AnySearch: real key, or an explicit anonymous opt-in.
                 ok = cls._is_real_key(raw_key) or anonymous_on
+            elif pid == "keenable":
+                # Keenable: real key, or an explicit anonymous opt-in.
+                ok = cls._is_real_key(raw_key) or keenable_anonymous_on
             elif pid == "searxng":
                 # SearXNG: self-hosted, no auth — available when instance URL is set.
                 ok = bool(searxng_url)
@@ -4305,8 +4315,8 @@ class ModelsHandler:
                 # piggy-back on a model-vendor credential. Frontend uses
                 # this hint to decide which credential editor to surface.
                 # Lets the frontend badge "匿名/anonymous" only in anonymous mode.
-                "anonymous": pid == "anysearch" and ok and not raw_key,
-                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply", "tavily"),
+                "anonymous": pid in ("anysearch", "keenable") and ok and not raw_key,
+                "needs_dedicated_key": pid in ("bocha", "anysearch", "serply", "tavily", "keenable"),
                 "needs_url": pid == "searxng",
                 # SearXNG stores an instance URL (not a secret), so echo it back
                 # verbatim to prefill/edit; other providers mask their key.
@@ -5253,32 +5263,36 @@ class ModelsHandler:
     def _handle_set_search_credential(self, data: dict) -> str:
         """Persist a dedicated search-provider key under tools.web_search.
 
-        bocha, anysearch and serply own their keys here; zhipu/qianfan/linkai
-        reuse model-vendor credentials and go through set_provider instead.
+        bocha, anysearch, serply and keenable own their keys here; anysearch
+        and keenable also take an ``anonymous`` flag that, with an empty key,
+        turns on their keyless tier (``<provider>_anonymous``). zhipu/qianfan/
+        linkai reuse model-vendor credentials and go through set_provider
+        instead.
         """
         provider = (data.get("provider") or "bocha").strip().lower()
-        if provider not in ("bocha", "anysearch", "serply", "tavily", "searxng"):
+        if provider not in ("bocha", "anysearch", "serply", "tavily", "searxng", "keenable"):
             return json.dumps({"status": "error", "message": f"unsupported search provider: {provider!r}"})
 
-        if provider == "anysearch":
+        if provider in ("anysearch", "keenable"):
             anonymous = data.get("anonymous", False)
 
             api_key = (data.get("api_key") or "").strip() if isinstance(data.get("api_key"), str) else ""
+            key_field = f"{provider}_api_key"
+            anonymous_field = f"{provider}_anonymous"
+            anonymous_on = bool(anonymous and not api_key)
 
             local_config = conf()
             file_cfg = self._read_file_config()
 
-            self._set_nested_namespace_value(local_config, "tools", "web_search", "anysearch_api_key", api_key)
-            self._set_nested_namespace_value(file_cfg, "tools", "web_search", "anysearch_api_key", api_key)
+            self._set_nested_namespace_value(local_config, "tools", "web_search", key_field, api_key)
+            self._set_nested_namespace_value(file_cfg, "tools", "web_search", key_field, api_key)
 
-            self._set_nested_namespace_value(local_config, "tools", "web_search", "anysearch_anonymous",
-                                             bool(anonymous and not api_key))
-            self._set_nested_namespace_value(file_cfg, "tools", "web_search", "anysearch_anonymous",
-                                             bool(anonymous and not api_key))
+            self._set_nested_namespace_value(local_config, "tools", "web_search", anonymous_field, anonymous_on)
+            self._set_nested_namespace_value(file_cfg, "tools", "web_search", anonymous_field, anonymous_on)
 
             self._write_file_config(file_cfg)
             logger.info(
-                f"[ModelsHandler] search credential set: anysearch_api_key={'***' if api_key else ''}, anonymous={bool(anonymous and not api_key)}")
+                f"[ModelsHandler] search credential set: {key_field}={'***' if api_key else ''}, {anonymous_field}={anonymous_on}")
             return json.dumps({"status": "success", "provider": provider})
         if provider == "searxng":
             # SearXNG uses an instance URL, not an API key.

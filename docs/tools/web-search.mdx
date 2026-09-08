@@ -3,7 +3,7 @@ title: web_search - Web Search
 description: Search the internet for real-time information, with support for multiple search providers
 ---
 
-Search the internet for real-time information, news, research, and more. Supports eight backends — Bocha, ERNIE, GLM, LinkAI, AnySearch, Serply, Tavily, and SearXNG — and works once any one of them is configured.
+Search the internet for real-time information, news, research, and more. Supports nine backends: Bocha, ERNIE, GLM, LinkAI, AnySearch, Serply, Tavily, SearXNG, and Keenable. Keenable also has a keyless anonymous mode that you turn on explicitly; each backend is used once its credentials (or that opt-in) are configured.
 
 <Tip>
   It is recommended to configure providers and routing strategy visually from the "Model Management → Search" panel in the [Web console](/channels/web), without manually editing the configuration file.
@@ -21,8 +21,9 @@ Search the internet for real-time information, news, research, and more. Support
 | Serply | `tools.web_search.serply_api_key` | [Serply](https://serply.io) ([docs](https://serply.io/docs)) |
 | Tavily | `tools.web_search.tavily_api_key` | [Tavily](https://tavily.com) |
 | SearXNG | `tools.web_search.searxng_url` (self-hosted instance URL, no API key needed) | [SearXNG](https://docs.searxng.org/) |
+| Keenable | Optional `tools.web_search.keenable_api_key`, or `keenable_anonymous: true` for keyless use | [Keenable](https://keenable.ai) |
 
-Except for Bocha, AnySearch, Serply, and Tavily which require dedicated keys, the other three reuse the corresponding model's API key — configuring the model automatically grants search capability. SearXNG is self-hosted and only requires an instance URL.
+Bocha, AnySearch, Serply, and Tavily require dedicated keys; Zhipu, ERNIE, and LinkAI reuse the corresponding model's API key — configuring the model automatically grants search capability. SearXNG is self-hosted and only requires an instance URL. Keenable is opt-in: set `tools.web_search.keenable_anonymous` to `true` (or save it with an empty key in the console's Search panel) and it calls a public endpoint with per-IP rate limits (10 requests/s, 1000/hour); an optional `keenable_api_key` (or `KEENABLE_API_KEY`) lifts them and needs no opt-in.
 
 ## Routing Strategy
 
@@ -37,7 +38,7 @@ Except for Bocha, AnySearch, Serply, and Tavily which require dedicated keys, th
 }
 ```
 
-- `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → anysearch → serply → tavily → searxng`.
+- `auto` (default): the Agent intelligently picks among configured providers and may call multiple providers in a single task to gather more comprehensive results; when none is specified, falls back through `bocha → qianfan → zhipu → linkai → anysearch → serply → tavily → searxng → keenable`.
 
 - `fixed`: always use the provider specified in `provider`; falls back to the auto order if that provider's credentials are missing.
 
@@ -52,6 +53,6 @@ Except for Bocha, AnySearch, Serply, and Tavily which require dedicated keys, th
 | `provider` | string | No | Available when multiple providers are configured under the `auto` strategy; used to switch provider for a single call |
 
 <Note>
-  If none of the eight credentials are configured, this tool is not registered with the Agent.
+  If none of the nine providers is configured (no key, no instance URL, and no anonymous opt-in), this tool is not registered with the Agent.
 </Note>
 

@@ -1,4 +1,4 @@
-"""Web Search tool. Supports eight backends with a unified response format:
+"""Web Search tool. Supports nine backends with a unified response format:
   - bocha   (https://open.bochaai.com)
   - zhipu   (https://docs.bigmodel.cn/cn/guide/tools/web-search)
   - qianfan (https://cloud.baidu.com/doc/qianfan/s/2mh4su4uy)
@@ -7,10 +7,13 @@
   - serply  (https://serply.io, Google/Bing SERP API)
   - tavily  (https://tavily.com, AI-optimized search API)
   - searxng (https://docs.searxng.org, self-hosted meta search engine)
+  - keenable (https://keenable.ai, keyless tier behind an explicit opt-in)
 
 Provider selection
   - strategy 'auto' (default): pick the first configured provider in the
-    canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply]. When
+    canonical order [bocha, qianfan, zhipu, linkai, anysearch, serply,
+    tavily, searxng, keenable]. Keenable counts as configured with a key or with the explicit
+    `keenable_anonymous` opt-in (same contract as `anysearch_anonymous`). When
     the caller passes an explicit `provider` it overrides the pick; an
     invalid/unconfigured one silently falls back to the auto order.
   - strategy 'fixed': use the configured provider; if its credential is
@@ -23,6 +26,11 @@ Credentials
   - linkai  : conf.linkai_api_key              ->  env LINKAI_API_KEY
   - anysearch : tools.web_search.anysearch_api_key  -> env ANYSEARCH_API_KEY
   - serply  : tools.web_search.serply_api_key  ->  env SERPLY_API_KEY
+  - tavily  : tools.web_search.tavily_api_key  ->  env TAVILY_API_KEY
+  - searxng : tools.web_search.searxng_url     ->  env SEARXNG_URL
+  - keenable: tools.web_search.keenable_api_key -> env KEENABLE_API_KEY (optional,
+              only lifts the rate limits of the keyless public endpoint);
+              keyless use is opt-in via tools.web_search.keenable_anonymous
 """
 
 import json
@@ -43,8 +51,10 @@ DEFAULT_TIMEOUT = 30
 # quality + relevance: bocha (best overall), qianfan (best for hot news),
 # zhipu (strong on long-form articles), linkai (cloud aggregator),
 # anysearch, serply (global Google/Bing SERP, last since it isn't
-# benchmarked against the Chinese-market providers above).
-PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng")
+# benchmarked against the Chinese-market providers above), tavily, searxng,
+# keenable (global index, keyless tier behind an explicit opt-in; placed last
+# so any provider the user paid for wins).
+PROVIDER_ORDER = ("bocha", "qianfan", "zhipu", "linkai", "anysearch", "serply", "tavily", "searxng", "keenable")
 
 PROVIDER_LABELS = {
     "bocha":   "Bocha",
@@ -55,6 +65,7 @@ PROVIDER_LABELS = {
     "serply":  "Serply",
     "tavily":  "Tavily",
     "searxng": "SearXNG",
+    "keenable": "Keenable",
 }
 
 
@@ -91,12 +102,20 @@ def _get_api_key(provider: str) -> str:
     if provider == "tavily":
         key = (_tools_web_search_conf().get("tavily_api_key") or "").strip()
         return key or os.environ.get("TAVILY_API_KEY", "").strip()
+    if provider == "keenable":
+        key = (_tools_web_search_conf().get("keenable_api_key") or "").strip()
+        return key or os.environ.get("KEENABLE_API_KEY", "").strip()
     return ""
 
 
 def _anysearch_anonymous_enabled() -> bool:
     """Check if AnySearch anonymous mode is enabled via config."""
     return bool(_tools_web_search_conf().get("anysearch_anonymous"))
+
+
+def _keenable_anonymous_enabled() -> bool:
+    """Check if Keenable anonymous (keyless) mode is enabled via config."""
+    return bool(_tools_web_search_conf().get("keenable_anonymous"))
 
 
 def _get_searxng_url() -> str:
@@ -106,9 +125,10 @@ def _get_searxng_url() -> str:
 
 
 def configured_providers() -> List[str]:
-    """Configured providers in canonical order. anysearch qualifies with a
-    real key OR an explicit anonymous opt-in (still last in fallback order).
-    searxng qualifies when an instance URL is configured."""
+    """Configured providers in canonical order. anysearch and keenable qualify
+    with a real key OR an explicit anonymous opt-in (still last in fallback
+    order); nothing goes keyless unless the user turned it on. searxng
+    qualifies when an instance URL is configured."""
     result = []
     for p in PROVIDER_ORDER:
         if _get_api_key(p):
@@ -116,6 +136,8 @@ def configured_providers() -> List[str]:
         elif p == "anysearch" and _anysearch_anonymous_enabled():
             result.append(p)
         elif p == "searxng" and _get_searxng_url():
+            result.append(p)
+        elif p == "keenable" and _keenable_anonymous_enabled():
             result.append(p)
     return result
 
@@ -150,13 +172,13 @@ class WebSearch(BaseTool):
                     "Time range filter. Options: "
                     "'noLimit' (default), 'oneDay', 'oneWeek', 'oneMonth', 'oneYear', "
                     "or date range like '2025-01-01..2025-02-01'. "
-                    "Honored by bocha/zhipu/qianfan/linkai; ignored by anysearch."
+                    "Honored by bocha/zhipu/qianfan/linkai/keenable; ignored by anysearch."
                 )
             },
             "summary": {
                 "type": "boolean",
                 "description": "Whether to include text summary for each result (default: false). "
-                               "Bocha/linkai only; ignored by anysearch."
+                               "Bocha/linkai/keenable only; ignored by anysearch."
             }
         },
         "required": ["query"]
@@ -167,7 +189,8 @@ class WebSearch(BaseTool):
 
     @staticmethod
     def is_available() -> bool:
-        """Tool is offered to the agent when at least one provider has a key."""
+        """Tool is offered to the agent when at least one provider has a key
+        or an explicit anonymous opt-in (anysearch_anonymous / keenable_anonymous)."""
         return bool(configured_providers())
 
     def get_json_schema(self) -> dict:
@@ -289,6 +312,8 @@ class WebSearch(BaseTool):
                 return self._search_tavily(query, count)
             if provider == "searxng":
                 return self._search_searxng(query, count)
+            if provider == "keenable":
+                return self._search_keenable(query, count, freshness, summary)
             return ToolResult.fail(f"Error: Unknown provider '{provider}'")
         except requests.Timeout:
             return ToolResult.fail(f"Error: Search request timed out after {DEFAULT_TIMEOUT}s")
@@ -650,6 +675,80 @@ class WebSearch(BaseTool):
             "query": query, "backend": "serply",
             "total": len(results), "count": len(results), "results": results,
         })
+
+    # ------------------------------------------------------------------
+    # Keenable
+    # ------------------------------------------------------------------
+
+    def _search_keenable(self, query: str, count: int, freshness: str, summary: bool) -> ToolResult:
+        api_key = _get_api_key("keenable")
+        # Keenable serves anonymous traffic on a public endpoint that wants an
+        # app title instead of a key (rate limited per IP: 10 requests/s,
+        # 1000/hour). Reaching this branch without a key means the user set
+        # keenable_anonymous. A key switches to the authenticated endpoint,
+        # which only lifts those limits.
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Keenable-Title": "cowagent",
+        }
+        if api_key:
+            url = "https://api.keenable.ai/v1/search"
+            headers["X-API-Key"] = api_key
+        else:
+            url = "https://api.keenable.ai/v1/search/public"
+
+        payload: Dict[str, Any] = {
+            "query": query,
+            "max_results": max(1, min(int(count or 10), 50)),
+            # A hint, not a hard cap: the API rounds up to a word boundary.
+            "snippet_max_length": 1000 if summary else 300,
+        }
+        payload.update(self._keenable_build_freshness_filter(freshness))
+
+        logger.debug(
+            f"[WebSearch] keenable: query='{query}', max_results={payload['max_results']}, keyed={bool(api_key)}"
+        )
+        resp = requests.post(url, headers=headers, json=payload, timeout=DEFAULT_TIMEOUT)
+
+        if resp.status_code == 401:
+            return ToolResult.fail("Error: Invalid Keenable API key.")
+        if resp.status_code == 429:
+            hint = "" if api_key else " Set keenable_api_key / KEENABLE_API_KEY to lift the keyless limit."
+            return ToolResult.fail(f"Error: Keenable API rate limit reached.{hint}")
+        if resp.status_code != 200:
+            return ToolResult.fail(f"Error: Keenable API returned HTTP {resp.status_code}: {resp.text[:200]}")
+
+        data = resp.json()
+        results = []
+        for it in data.get("results") or []:
+            results.append({
+                "title": it.get("title", ""),
+                "url": it.get("url", ""),
+                # `snippet` carries the page text; `description` is usually empty.
+                "snippet": it.get("snippet") or it.get("description") or "",
+                "datePublished": it.get("published_at") or "",
+            })
+        return ToolResult.success({
+            "query": query, "backend": "keenable",
+            "total": len(results), "count": len(results), "results": results,
+        })
+
+    @staticmethod
+    def _keenable_build_freshness_filter(freshness: str) -> Dict[str, str]:
+        """Translate the shared freshness vocabulary into Keenable's
+        `published_after` / `published_before` (YYYY-MM-DD) request fields.
+        Accepts the named tokens and the `2025-01-01..2025-02-01` range form."""
+        if not freshness or freshness == "noLimit":
+            return {}
+        delta_days = {"oneDay": 1, "oneWeek": 7, "oneMonth": 30, "oneYear": 365}.get(freshness)
+        if delta_days:
+            from datetime import datetime, timedelta
+            return {"published_after": (datetime.now() - timedelta(days=delta_days)).strftime("%Y-%m-%d")}
+        start, sep, end = freshness.partition("..")
+        if sep and start.strip() and end.strip():
+            return {"published_after": start.strip(), "published_before": end.strip()}
+        return {}
 
     # ------------------------------------------------------------------
     # Tavily

@@ -164,6 +164,9 @@ const I18N = {
         models_search_anysearch_anon_hint: '留空可启用匿名模式（无需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
+        models_search_keenable_title: '配置 Keenable API Key（可选）',
+        models_search_keenable_desc: 'Keenable 支持匿名模式（无需 API Key）；配置密钥仅用于提升频率上限，前往 keenable.ai 获取。',
+        models_search_keenable_anon_hint: '（留空保存即启用匿名模式，公共接口按 IP 限流）',
         models_search_edit_hint: '点击修改配置',
         models_unavailable: '不可用',
         models_set_via_env: '通过环境变量启用',
@@ -656,6 +659,9 @@ const I18N = {
         models_search_anysearch_anon_hint: '留空可啟用匿名模式（無需 API Key）',
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
+        models_search_keenable_title: '設定 Keenable API Key（選填）',
+        models_search_keenable_desc: 'Keenable 支援匿名模式（無需 API Key）；設定金鑰僅用於提高呼叫頻率上限，前往 keenable.ai 取得。',
+        models_search_keenable_anon_hint: '（留空儲存即啟用匿名模式，公開介面依 IP 限流）',
         models_search_edit_hint: '點選修改設定',
         models_unavailable: '不可用',
         models_set_via_env: '透過環境變數啟用',
@@ -1143,6 +1149,9 @@ const I18N = {
         models_search_anysearch_anon_hint: 'Leave empty to enable anonymous mode (no API key required)',
         models_search_anonymous_badge: 'anonymous',
         models_search_anonymous_disable: 'Disable anonymous',
+        models_search_keenable_title: 'Configure Keenable API Key (optional)',
+        models_search_keenable_desc: 'Keenable has an anonymous mode (no API key); a key only lifts the rate limits. Get one at keenable.ai.',
+        models_search_keenable_anon_hint: '(Leave blank to enable anonymous mode; the public endpoint is rate limited per IP)',
         models_search_edit_hint: 'Click to edit',
         models_unavailable: 'unavailable',
         models_set_via_env: 'enable via environment variable',
@@ -10974,7 +10983,7 @@ function _launchSearchProviderConfig(providerId, providerMeta) {
     // Providers that hold their own credential (dedicated key or, for SearXNG,
     // an instance URL) use the bespoke search-key modal. zhipu/qianfan/linkai
     // reuse a model-vendor key and go through the vendor modal instead.
-    if (['bocha', 'anysearch', 'serply', 'tavily', 'searxng'].includes(providerId)) {
+    if (['bocha', 'anysearch', 'serply', 'tavily', 'searxng', 'keenable'].includes(providerId)) {
         openSearchKeyModal(providerId, providerMeta);
     } else {
         openVendorModal(providerId, () => loadModelsView({ preserveScroll: true }));
@@ -11034,7 +11043,8 @@ function openSearchKeyModal(providerId, providerMeta) {
     }
     // SearXNG URL is not masked, so it's safe to keep editable (not a sentinel).
     const hasKey = !!masked;
-    const isAnonymous = providerId === 'anysearch' && !!((providerMeta && providerMeta.anonymous) || (prov && prov.anonymous));
+    const isAnonymous = (providerId === 'anysearch' || providerId === 'keenable')
+        && !!((providerMeta && providerMeta.anonymous) || (prov && prov.anonymous));
     const clearBtnHtml = (hasKey || isAnonymous)
         ? `<button type="button" id="search-key-clear"
                   class="px-3 py-1.5 rounded-md text-xs text-red-500 dark:text-red-400
@@ -11048,6 +11058,9 @@ function openSearchKeyModal(providerId, providerMeta) {
             ? '（留空可启用匿名模式，每日有免费额度）'
             : '(Leave blank to enable anonymous mode with daily free quota)';
         descText = descText + ' ' + hint;
+    }
+    if (providerId === 'keenable') {
+        descText = descText + ' ' + t('models_search_keenable_anon_hint');
     }
 
     const modal = document.createElement('div');
@@ -11130,7 +11143,8 @@ function _saveSearchKey(providerId) {
     }
     const apiKey = input.value.trim();
 
-    if (providerId === 'anysearch') {
+    // anysearch and keenable: saving with an empty key enables the anonymous tier.
+    if (providerId === 'anysearch' || providerId === 'keenable') {
     fetch('/api/models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
