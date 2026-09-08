@@ -165,8 +165,8 @@ const I18N = {
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
         models_search_keenable_title: '配置 Keenable API Key（可选）',
-        models_search_keenable_desc: 'Keenable 支持匿名模式（无需 API Key）；配置密钥仅用于提升频率上限，前往 keenable.ai 获取。',
-        models_search_keenable_anon_hint: '（留空保存即启用匿名模式，公共接口按 IP 限流）',
+        models_search_keenable_desc: '留空保存启用匿名模式；填入密钥可提升频率上限。',
+        models_search_keenable_anon_hint: '',
         models_search_edit_hint: '点击修改配置',
         models_unavailable: '不可用',
         models_set_via_env: '通过环境变量启用',
@@ -660,8 +660,8 @@ const I18N = {
         models_search_anonymous_badge: '匿名',
         models_search_anonymous_disable: '停用匿名',
         models_search_keenable_title: '設定 Keenable API Key（選填）',
-        models_search_keenable_desc: 'Keenable 支援匿名模式（無需 API Key）；設定金鑰僅用於提高呼叫頻率上限，前往 keenable.ai 取得。',
-        models_search_keenable_anon_hint: '（留空儲存即啟用匿名模式，公開介面依 IP 限流）',
+        models_search_keenable_desc: '留空儲存啟用匿名模式；填入金鑰可提高頻率上限。',
+        models_search_keenable_anon_hint: '',
         models_search_edit_hint: '點選修改設定',
         models_unavailable: '不可用',
         models_set_via_env: '透過環境變數啟用',
@@ -1150,8 +1150,8 @@ const I18N = {
         models_search_anonymous_badge: 'anonymous',
         models_search_anonymous_disable: 'Disable anonymous',
         models_search_keenable_title: 'Configure Keenable API Key (optional)',
-        models_search_keenable_desc: 'Keenable has an anonymous mode (no API key); a key only lifts the rate limits. Get one at keenable.ai.',
-        models_search_keenable_anon_hint: '(Leave blank to enable anonymous mode; the public endpoint is rate limited per IP)',
+        models_search_keenable_desc: 'Save empty to enable anonymous mode; add a key to lift the rate limits.',
+        models_search_keenable_anon_hint: '',
         models_search_edit_hint: 'Click to edit',
         models_unavailable: 'unavailable',
         models_set_via_env: 'enable via environment variable',
@@ -11059,10 +11059,6 @@ function openSearchKeyModal(providerId, providerMeta) {
             : '(Leave blank to enable anonymous mode with daily free quota)';
         descText = descText + ' ' + hint;
     }
-    if (providerId === 'keenable') {
-        descText = descText + ' ' + t('models_search_keenable_anon_hint');
-    }
-
     const modal = document.createElement('div');
     modal.id = 'search-key-modal';
     modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm';
