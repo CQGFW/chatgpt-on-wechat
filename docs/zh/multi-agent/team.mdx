@@ -67,16 +67,15 @@ CowAgent 不再只是一个 Agent，你可以创建多个 Agent 组成一支团�
 
 ## 通道接入
 
-同一种通道可运行多个实例，每个实例绑定不同的 Agent 或团队，对外呈现为各自独立的助手，例如两个飞书机器人分别由客服 Agent 和研发 Agent 接管。
+同一种类型的通道可运行多个实例，每个实例可以绑定不同的单 Agent 或整个 Agent 团队，对外呈现为各自独立的助手。
 
 在「通道」页面，为一个已连接的实例设置绑定智能体即可：
 
 - 第一个选中的是负责人（owner），负责接收这个通道的所有任务。
-- 可以再添加若干成员，负责人可以把某轮对话交给他们处理。
+- 可以再添加若干成员，负责人会根据成员职责，将合适的任务分配给他们处理。
+- 在通道中通过 `@` 加成员名称或 ID，即可直接与某个成员对话。
 
 <img src="https://cdn.link-ai.tech/doc/20260908204924.png" alt="Agent-team-channel" width="800"/>
-
-
 
 
 绑定的改动会即时生效，无需重启通道。支持多实例的通道包括微信、企业微信机器人、钉钉、飞书、QQ、Telegram、Slack、Discord 等。
@@ -101,6 +100,11 @@ CowAgent 不再只是一个 Agent，你可以创建多个 Agent 组成一支团�
 - **回复**：主 Agent 汇总后统一回复用户，用户始终面对同一个入口。
 
 委派的范围、链路深度、时间预算等细节由 [agent_delegate 工具](/zh/tools/delegate) 承载，可在配置中调整。
+
+
+<img src="https://cdn.link-ai.tech/doc/8c2cae749a7994d5fedbce3b0723fa7b.png" alt="Agent-team-delegate" width="800"/>
+
+
 
 ## 与子 Agent 的区别
 

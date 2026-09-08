@@ -17,7 +17,7 @@
   [<a href="../../README.md">English</a>] | [<a href="../zh/README.md">中文</a>] | [<a href="../zh/README-Hant.md">繁體中文</a>] | [日本語]
 </p>
 
-**CowAgent** は、自律的にタスクを計画し、コンピュータや外部リソースを操作し、Skill を作成・実行し、パーソナルナレッジベースと長期記憶を構築し、自己進化によってユーザーとともに成長するオープンソースのスーパー AI アシスタントです。エンドツーエンドの Agent Harness のリファレンス実装の一つでもあります。
+**CowAgent** は、自律的にタスクを計画し、コンピュータや外部リソースを操作し、Skill を作成・実行し、パーソナルナレッジベースと長期記憶を構築し、マルチエージェントチームを編成し、自己進化によってユーザーとともに成長するオープンソースのスーパー AI アシスタントです。エンドツーエンドの Agent Harness のリファレンス実装の一つでもあります。
 
 CowAgent は軽量でデプロイしやすく、拡張性に優れています。主要な LLM プロバイダーをそのまま組み込み、Web や主要な IM プラットフォーム上で動作。個人 PC やサーバー上で 24 時間 365 日稼働できます。
 
@@ -48,6 +48,7 @@ CowAgent は軽量でデプロイしやすく、拡張性に優れています�
 | 機能 | 説明 |
 | :--- | :--- |
 | [タスク計画](https://docs.cowagent.ai/ja/intro/architecture) | 複雑なタスクを分解し、目標達成までツールを繰り返し呼び出して段階的に実行 |
+| [マルチエージェントチーム](https://docs.cowagent.ai/ja/multi-agent/team) | 複数の Agent でチームを編成。各メンバーが独自の役割・モデル・スキル・知識を持ち、同一の会話内で分担して協働 |
 | [長期記憶](https://docs.cowagent.ai/ja/memory/index) | 三層構造（コンテキスト → デイリー → コア）、Deep Dream による自動蒸留、キーワードとベクトルのハイブリッド検索 |
 | [ナレッジベース](https://docs.cowagent.ai/ja/knowledge/index) | 構造化された知識を Markdown Wiki として自動整理し、進化し続けるナレッジグラフを可視化ブラウジング |
 | [自己進化](https://docs.cowagent.ai/ja/memory/self-evolution) | 会話を自動でレビューして Skill を改善し、未完了のタスクを引き継ぎ、記憶と知識を補完。日々の利用を通じて成長 |
@@ -113,6 +114,18 @@ cow install-browser                # ブラウザツールのインストール
 
 <br/>
 
+## 👥 マルチエージェントチーム
+
+複数の Agent でチームを編成できます。各メンバーは独自の役割・モデル・スキル・知識を持ち、ワークスペース・記憶・セッションは互いに分離されているため、それぞれの領域に集中しつつ、同一の会話に呼び込んで複雑なタスクを協働で解決できます。
+
+複数の Agent はグループチャット内で作業を分担でき、リーダー Agent がタスクを受け取り、役割に応じて適切なメンバーへ委任します。同じ種類のチャネルでも複数のインスタンスを実行でき、それぞれ別の Agent やチーム全体に紐付けて、外部には独立したアシスタントとして提示できます。
+
+<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-team-overview.png" alt="CowAgent Multi-Agent Team" width="800"/>
+
+> 詳しくは [Agent チーム](https://docs.cowagent.ai/ja/multi-agent/team) を参照してください。
+
+<br/>
+
 ## 🤖 モデル
 
 CowAgent は主要な LLM プロバイダーすべてに対応しています。**チャット、画像認識、画像生成、ASR/TTS、埋め込み（Embedding）** の各機能はそれぞれ別のベンダーで設定可能です。
@@ -120,7 +133,7 @@ CowAgent は主要な LLM プロバイダーすべてに対応しています。
 | プロバイダー | 代表的なモデル | チャット | 画像認識 | 画像生成 | ASR | TTS | Embedding |
 | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: |
 | [DeepSeek](https://docs.cowagent.ai/ja/models/deepseek) | deepseek-v4-flash / pro | ✅ | | | | | |
-| [Claude](https://docs.cowagent.ai/ja/models/claude) | claude-opus-5 / sonnet-5 | ✅ | ✅ | | | | |
+| [Claude](https://docs.cowagent.ai/ja/models/claude) | claude-opus-5 / fable-5.1 | ✅ | ✅ | | | | |
 | [OpenAI](https://docs.cowagent.ai/ja/models/openai) | gpt-5.6 シリーズ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | [Gemini](https://docs.cowagent.ai/ja/models/gemini) | gemini-3.7-flash | ✅ | ✅ | ✅ | | | |
 | [MiniMax](https://docs.cowagent.ai/ja/models/minimax) | MiniMax-M3 | ✅ | ✅ | ✅ | | ✅ | |
@@ -214,6 +227,8 @@ CowAgent は主要な LLM プロバイダーすべてに対応しています。
 <br/>
 
 ## 🏷 更新履歴
+
+> **2026.09.07:** [v2.1.8](https://github.com/zhayujie/CowAgent/releases/tag/2.1.8) — マルチエージェントチーム、定時タスクの手動作成、コンテキスト使用量の可視化、新モデルと検索プロバイダーの追加、ワークスペースファイルの編集。
 
 > **2026.08.20:** [v2.1.7](https://github.com/zhayujie/CowAgent/releases/tag/2.1.7) — セッションごとに分離できる複数ワークスペース、セッション単位の権限モード、タスク通知、デスクトップの改善、新モデルの追加。
 
