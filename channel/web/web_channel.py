@@ -8225,12 +8225,19 @@ class SessionContextUsageHandler:
             if not session_id:
                 return json.dumps({"status": "error", "message": "session_id required"})
 
+            # Live agent instances are keyed by (agent_id, session_id), so a
+            # non-default agent's context is only found when its id is supplied.
+            # Without this the lookup falls back to the default agent and always
+            # reports available=false for e.g. content-writer sessions.
+            from urllib.parse import parse_qs
+            agent_id = _request_agent_id(parse_qs(web.ctx.env.get("QUERY_STRING") or ""))
+
             from bridge.bridge import Bridge
             bridge = Bridge()
             ab = bridge.get_agent_bridge()
             # peek_agent, not get_agent: the latter builds the agent on miss
             # (MCP + skills), and this endpoint is called on hover.
-            agent = ab.peek_agent(session_id)
+            agent = ab.peek_agent(session_id, agent_id=agent_id)
             if agent is None:
                 # No live context yet — a fresh session, or one just cleared
                 # (clear_context drops the instance).
@@ -8259,10 +8266,18 @@ class SessionCompactContextHandler:
             if not session_id:
                 return json.dumps({"status": "error", "message": "session_id required"})
 
+            # Match the agent that owns this session (instances are keyed by
+            # (agent_id, session_id)); otherwise compaction targets the wrong
+            # agent and no-ops for non-default agents.
+            params = web.input(agent_id='')
+            raw_body = web.data()
+            body = json.loads(raw_body) if raw_body else {}
+            agent_id = _request_agent_id(body) or _request_agent_id(params)
+
             from bridge.bridge import Bridge
             bridge = Bridge()
             ab = bridge.get_agent_bridge()
-            agent = ab.peek_agent(session_id)
+            agent = ab.peek_agent(session_id, agent_id=agent_id)
             if agent is None:
                 # No live context — nothing to compact.
                 return json.dumps({
