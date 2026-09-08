@@ -287,6 +287,7 @@ const I18N = {
         channels_select_placeholder: '选择要接入的通道...',
         channels_empty: '暂未接入任何通道', channels_empty_desc: '点击右上角「接入通道」按钮开始配置',
         channels_disconnect_confirm: '确认断开该通道？配置将保留但通道会停止运行。',
+        channels_disconnect_error: '断开失败',
         channels_connected: '已接入', channels_connecting: '接入中...',
         weixin_scan_title: '微信扫码登录', weixin_scan_desc: '请使用微信扫描下方二维码',
         weixin_scan_loading: '正在获取二维码...', weixin_scan_waiting: '等待扫码...',
@@ -782,6 +783,7 @@ const I18N = {
         channels_select_placeholder: '選擇要接入的管道...',
         channels_empty: '暫未接入任何管道', channels_empty_desc: '點選右上角「接入管道」按鈕開始設定',
         channels_disconnect_confirm: '確認斷開該管道？設定將保留但管道會停止執行。',
+        channels_disconnect_error: '斷開失敗',
         channels_connected: '已接入', channels_connecting: '接入中...',
         weixin_scan_title: '微信掃碼登入', weixin_scan_desc: '請使用微信掃描下方二維碼',
         weixin_scan_loading: '正在獲取二維碼...', weixin_scan_waiting: '等待掃碼...',
@@ -1272,6 +1274,7 @@ const I18N = {
         channels_select_placeholder: 'Select a channel to connect...',
         channels_empty: 'No channels connected', channels_empty_desc: 'Click the "Connect" button above to get started',
         channels_disconnect_confirm: 'Disconnect this channel? Config will be preserved but the channel will stop.',
+        channels_disconnect_error: 'Failed to disconnect',
         channels_connected: 'Connected', channels_connecting: 'Connecting...',
         weixin_scan_title: 'WeChat QR Login', weixin_scan_desc: 'Scan the QR code below with WeChat',
         weixin_scan_loading: 'Loading QR code...', weixin_scan_waiting: 'Waiting for scan...',
@@ -12456,6 +12459,9 @@ function channelRenderList() {
             list.push(Object.assign({}, inst, { iid: inst.instance_id }));
         });
     }
+    // Show WeChat cards first; keep every other card in its existing relative
+    // order (stable sort: weixin -> 0, everything else -> 1).
+    list.sort((a, b) => (a.name === 'weixin' ? 0 : 1) - (b.name === 'weixin' ? 0 : 1));
     return list;
 }
 
@@ -12863,9 +12869,14 @@ function disconnectChannel(chName, instanceId) {
                         if (ch) ch.active = false;
                         renderActiveChannels();
                     }
+                } else {
+                    // Surface the failure instead of silently leaving the card in
+                    // place — otherwise a rejected disconnect looks like nothing
+                    // happened at all.
+                    _wsToast(data.message || t('channels_disconnect_error'));
                 }
             })
-            .catch(() => {});
+            .catch(() => _wsToast(t('channels_disconnect_error')));
         }
     });
 }

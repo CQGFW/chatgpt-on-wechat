@@ -5659,7 +5659,15 @@ class ChannelsHandler:
             # "create a new instance".
             from channel.channel_instances import MULTI_INSTANCE_READY
             instance_id = (body.get("instance_id") or "").strip()
-            if self._multi_agent_mode() and channel_name in MULTI_INSTANCE_READY:
+            # A multi-instance-ready type (feishu) is only an *instance* when it
+            # carries an instance_id (connect with an empty id creates one). But
+            # the same type can still be active the legacy way — enabled in
+            # config.json's channel_type before this install went multi-Agent —
+            # in which case its card has no instance_id. Disconnect/rename on
+            # such a card must fall through to the legacy per-type path, or it
+            # would be rejected ("instance_id is required") and never removed.
+            is_instance_op = action in ("save", "connect") or bool(instance_id)
+            if self._multi_agent_mode() and channel_name in MULTI_INSTANCE_READY and is_instance_op:
                 if action == "save":
                     return self._handle_instance_save(channel_name, instance_id, body.get("config", {}))
                 elif action == "connect":
@@ -6020,10 +6028,25 @@ class ChannelsHandler:
 
     def _handle_instance_disconnect(self, channel_name: str, instance_id: str):
         """Remove one instance record from team.json and stop its channel."""
-        from channel.channel_instances import remove_instance
+        from channel.channel_instances import remove_instance, read_raw_instances
 
         if not instance_id:
             return json.dumps({"status": "error", "message": "instance_id is required"})
+
+        # A legacy channel (enabled the old way via config.json's channel_type)
+        # is folded into channel_instances on every team.json write by
+        # bootstrap_legacy_instances. Just dropping the record isn't enough:
+        # remove_instance itself writes team.json, whose bootstrap immediately
+        # re-materializes the record straight from channel_type — so the card
+        # comes right back. Prune the type from channel_type *first* (when this
+        # is the last instance of it), so by the time remove_instance writes,
+        # the bootstrap has nothing to recreate.
+        remaining = [
+            r for r in read_raw_instances(conf())
+            if str(r.get("instance_id") or "").strip() != instance_id
+        ]
+        self._prune_legacy_channel_type(channel_name, remaining)
+
         remove_instance(conf(), instance_id)
 
         def _do_stop():
@@ -6045,6 +6068,46 @@ class ChannelsHandler:
 
         threading.Thread(target=_do_stop, daemon=True).start()
         return json.dumps({"status": "success", "instance_id": instance_id}, ensure_ascii=False)
+
+    def _prune_legacy_channel_type(self, channel_name: str, remaining):
+        """Drop *channel_name* from config.json's channel_type once no instance
+        of that type is left (``remaining`` = the instance records that will
+        survive this disconnect).
+
+        Without this, bootstrap_legacy_instances (which runs on every team.json
+        write and is keyed off channel_type) would recreate the instance we just
+        removed, so the disconnect would never stick. Only prunes when the last
+        instance of the type is gone, so removing one of several Feishu bots
+        leaves the type — and the others — untouched.
+        """
+        from channel.channel_instances import _normalize_type
+
+        target = _normalize_type(channel_name)
+        if any(_normalize_type(str(r.get("channel_type") or "")) == target for r in remaining):
+            return
+
+        existing = self._parse_channel_list(conf().get("channel_type", ""))
+        pruned = [ch for ch in existing if _normalize_type(ch) != target]
+        if len(pruned) == len(existing):
+            return
+        new_channel_type = ",".join(pruned)
+
+        conf()["channel_type"] = new_channel_type
+        try:
+            config_path = os.path.join(get_data_root(), "config.json")
+            file_cfg = _read_config_file_for_write()
+            file_cfg["channel_type"] = new_channel_type
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(file_cfg, f, indent=4, ensure_ascii=False)
+            logger.info(
+                f"[WebChannel] Pruned legacy channel_type '{channel_name}', "
+                f"channel_type={new_channel_type}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[WebChannel] Failed to prune legacy channel_type '{channel_name}': {e}",
+                exc_info=True,
+            )
 
 
 class WeixinQrHandler:
