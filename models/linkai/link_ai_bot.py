@@ -1,5 +1,5 @@
-# access LinkAI knowledge base platform
-# docs: https://link-ai.tech/platform/link-app/wechat
+# access LinkAI agent platform
+# docs: https://docs.cowagent.ai/zh/models/linkai
 
 import re
 import time
@@ -18,6 +18,44 @@ import threading
 from common import memory, utils
 import base64
 import os
+
+
+def _linkai_base_url():
+    """Resolve the LinkAI API host, tolerating a stray trailing '/v1'.
+
+    Callers append '/v1/...' themselves, so a base that already ends in '/v1'
+    (a leftover from an OpenAI-style api_base) would build '.../v1/v1/...' and
+    hit no route, surfacing as a cryptic FastAPI 404 ({"detail":"Not Found"}).
+    Strip a trailing slash and a trailing '/v1' so both forms work.
+    """
+    base = (conf().get("linkai_api_base") or "https://api.link-ai.tech").strip()
+    base = base.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-len("/v1")]
+    return base
+
+
+def _explain_linkai_error(status_code, error_msg):
+    """Turn opaque gateway errors into actionable hints.
+
+    A bare FastAPI 404 ({"detail":"Not Found"}) means the request hit no route
+    on the LinkAI host — almost always a misconfigured linkai_api_base (e.g. one
+    that already carries a '/v1' suffix, yielding '.../v1/v1/chat/completions').
+    Surface that instead of the cryptic body so users can self-correct.
+    """
+    text = str(error_msg or "")
+    if status_code == 404 and ("not found" in text.lower() or '"detail"' in text.lower()):
+        base = (conf().get("linkai_api_base") or "").strip()
+        hint = (
+            "LinkAI endpoint not found (404). This usually means linkai_api_base "
+            "is misconfigured — it should be the host only, e.g. "
+            "'https://api.link-ai.tech' (without a trailing '/v1' or '/chat/completions')."
+        )
+        if base:
+            hint += f" Current linkai_api_base='{base}'."
+        return hint
+    return error_msg
+
 
 class LinkAIBot(Bot, OpenAICompatibleBot):
     # authentication failed
@@ -133,10 +171,11 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
             if file_id:
                 body["file_id"] = file_id
             logger.info(f"[LINKAI] query={query}, app_code={app_code}, model={body.get('model')}, file_id={file_id}")
-            headers = {"Authorization": "Bearer " + linkai_api_key}
+            headers = {"Authorization": "Bearer " + linkai_api_key, "X-Title": "CowAgent"}
+            utils.apply_client_source(headers)
 
             # do http request
-            base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
+            base_url = _linkai_base_url()
             res = requests.post(url=base_url + "/v1/chat/completions", json=body, headers=headers,
                                 timeout=conf().get("request_timeout", 180))
             if res.status_code == 200:
@@ -272,10 +311,15 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
             }
             if self.args.get("max_tokens"):
                 body["max_tokens"] = self.args.get("max_tokens")
-            headers = {"Authorization": "Bearer " + conf().get("linkai_api_key")}
+            sid = getattr(session, "session_id", "")
+            if sid and sid != "__title_gen__":
+                body["session_id"] = sid
+            headers = {"Authorization": "Bearer " + conf().get("linkai_api_key"), "X-Title": "CowAgent"}
+            utils.apply_client_source(headers)
+            utils.apply_cloud_user(headers)
 
             # do http request
-            base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
+            base_url = _linkai_base_url()
             res = requests.post(url=base_url + "/v1/chat/completions", json=body, headers=headers,
                                 timeout=conf().get("request_timeout", 180))
             if res.status_code == 200:
@@ -318,7 +362,7 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
     def _fetch_app_info(self, app_code: str):
         headers = {"Authorization": "Bearer " + conf().get("linkai_api_key")}
         # do http request
-        base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
+        base_url = _linkai_base_url()
         params = {"app_code": app_code}
         res = requests.get(url=base_url + "/v1/app/info", params=params, headers=headers, timeout=(5, 10))
         if res.status_code == 200:
@@ -333,6 +377,8 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {conf().get('linkai_api_key')}"
             }
+            utils.apply_client_source(headers)
+            utils.apply_cloud_user(headers)
             data = {
                 "prompt": query,
                 "n": 1,
@@ -340,7 +386,7 @@ class LinkAIBot(Bot, OpenAICompatibleBot):
                 "response_format": "url",
                 "img_proxy": conf().get("image_proxy")
             }
-            url = conf().get("linkai_api_base", "https://api.link-ai.tech") + "/v1/images/generations"
+            url = _linkai_base_url() + "/v1/images/generations"
             res = requests.post(url, headers=headers, json=data, timeout=(5, 90))
             t2 = time.time()
             image_url = res.json()["data"][0]["url"]
@@ -560,13 +606,29 @@ def _linkai_call_with_tools(self, messages, tools=None, stream=False, **kwargs):
             body["tools"] = tools
             body["tool_choice"] = kwargs.get("tool_choice", "auto")
 
+        model_name = str(body.get("model", "")).lower()
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort:
+            from models.reasoning_capabilities import get_reasoning_capability
+
+            # LinkAI forwards requests to different upstream vendors. Gate the
+            # passthrough field by verified model capability so OpenAI-like
+            # models do not receive an unknown parameter.
+            capability = get_reasoning_capability("linkai", model_name)
+            if capability.get("supported"):
+                body["reasoning_effort"] = reasoning_effort
+
         thinking = kwargs.get("thinking")
-        if thinking:
+        # Kimi K3 uses top-level reasoning_effort and rejects the generic
+        # thinking object used by older Kimi/DeepSeek-compatible paths.
+        if thinking and not model_name.startswith("kimi-k3"):
             body["thinking"] = thinking
 
         # Prepare headers
-        headers = {"Authorization": "Bearer " + conf().get("linkai_api_key")}
-        base_url = conf().get("linkai_api_base", "https://api.link-ai.tech")
+        headers = {"Authorization": "Bearer " + conf().get("linkai_api_key"), "X-Title": "CowAgent"}
+        utils.apply_client_source(headers)
+        utils.apply_cloud_user(headers)
+        base_url = _linkai_base_url()
         
         if stream:
             return self._handle_linkai_stream_response(base_url, headers, body)
@@ -608,8 +670,12 @@ def _handle_linkai_sync_response(self, base_url, headers, body):
             # LinkAI response is already in OpenAI-compatible format
             return response
         else:
-            error_data = res.json()
-            error_msg = error_data.get("error", {}).get("message", "Unknown error")
+            try:
+                error_data = res.json()
+                error_msg = error_data.get("error", {}).get("message", res.text)
+            except Exception:
+                error_msg = res.text or "Unknown error"
+            error_msg = _explain_linkai_error(res.status_code, error_msg)
             raise Exception(f"LinkAI API error: {res.status_code} - {error_msg}")
             
     except Exception as e:
@@ -634,7 +700,8 @@ def _handle_linkai_stream_response(self, base_url, headers, body):
                 error_msg = error_data.get("error", {}).get("message", error_text)
             except Exception:
                 error_msg = error_text or "Unknown error"
-            
+            error_msg = _explain_linkai_error(res.status_code, error_msg)
+
             yield {
                 "error": True,
                 "status_code": res.status_code,
@@ -673,6 +740,9 @@ def _handle_linkai_stream_response(self, base_url, headers, body):
                         }
                         return
 
+                    # Forward SSE JSON as-is so extensions (e.g. delta._gemini_raw_parts
+                    # for Gemini via LinkAI) reach agent_stream and are stored on assistant
+                    # messages for the next request. Standard OpenAI fields are unchanged.
                     yield chunk
                         
     except Exception as e:
@@ -683,7 +753,75 @@ def _handle_linkai_stream_response(self, base_url, headers, body):
             "status_code": 500
         }
 
+def _linkai_convert_messages_to_openai_format(self, messages):
+    """
+    Override the base OpenAI-compatible conversion to round-trip
+    ``reasoning_content`` on assistant messages.
+
+    Internally, the agent layer keeps the model's reasoning trace as a
+    Claude-style ``thinking`` content block on the assistant message. The
+    base converter drops that block. For thinking-capable models proxied via
+    LinkAI (DeepSeek V4, Kimi K2 thinking, …), the upstream API requires
+    the trace to be echoed back as a top-level ``reasoning_content`` field
+    on every assistant turn that contained tool calls — otherwise the next
+    request returns 400. We re-emit it for every assistant turn (it's
+    silently ignored on plain text turns).
+    """
+    openai_messages = OpenAICompatibleBot._convert_messages_to_openai_format(self, messages)
+    if not messages:
+        return openai_messages
+
+    # DeepSeek (proxied via LinkAI) requires `reasoning_content` on EVERY
+    # assistant message once the history contains any tool-call turn — not
+    # just the tool-call turn itself. Detect that condition first.
+    has_tool_call_history = False
+    for src in messages:
+        if src.get("role") != "assistant":
+            continue
+        if src.get("tool_calls"):
+            has_tool_call_history = True
+            break
+        content = src.get("content")
+        if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") == "tool_use" for b in content
+        ):
+            has_tool_call_history = True
+            break
+
+    # Walk the original Claude messages to collect each assistant turn's
+    # reasoning text, then attach it to the matching converted entry.
+    dst_idx = 0
+    for src in messages:
+        if src.get("role") != "assistant":
+            continue
+        content = src.get("content")
+        reasoning_parts = []
+        if isinstance(content, list):
+            reasoning_parts = [
+                b.get("thinking", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "thinking"
+            ]
+        # Locate the corresponding assistant entry in the converted list.
+        while dst_idx < len(openai_messages) and openai_messages[dst_idx].get("role") != "assistant":
+            dst_idx += 1
+        if dst_idx >= len(openai_messages):
+            break
+        dst_msg = openai_messages[dst_idx]
+        if reasoning_parts:
+            dst_msg["reasoning_content"] = "\n".join(reasoning_parts)
+        elif has_tool_call_history:
+            # Fallback when the trace was lost (proxy stripped it, model
+            # switched mid-session, thinking toggled on after tool calls).
+            # DeepSeek-style backends validate field presence, not value;
+            # non-thinking backends silently ignore the empty string.
+            dst_msg["reasoning_content"] = ""
+        dst_idx += 1
+
+    return openai_messages
+
+
 # Attach methods to LinkAIBot class
 LinkAIBot.call_with_tools = _linkai_call_with_tools
 LinkAIBot._handle_linkai_sync_response = _handle_linkai_sync_response
 LinkAIBot._handle_linkai_stream_response = _handle_linkai_stream_response
+LinkAIBot._convert_messages_to_openai_format = _linkai_convert_messages_to_openai_format

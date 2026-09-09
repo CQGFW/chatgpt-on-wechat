@@ -8,8 +8,11 @@ services:
     ports:
       - "9899:9899"
     environment:
-      CHANNEL_TYPE: 'weixin'
-      MODEL: 'MiniMax-M2.7'
+      COW_LANG: 'auto'
+      CHANNEL_TYPE: 'web, weixin'
+      MODEL: 'deepseek-v4-flash'
+      DEEPSEEK_API_KEY: ''
+      DEEPSEEK_API_BASE: 'https://api.deepseek.com/v1'
       MINIMAX_API_KEY: ''
       ZHIPU_AI_API_KEY: ''
       ARK_API_KEY: ''
@@ -35,10 +38,21 @@ services:
       DINGTALK_CLIENT_SECRET: ''
       WECOM_BOT_ID: ''
       WECOM_BOT_SECRET: ''
+      # To access the web console from the host, set this to '0.0.0.0' and set WEB_PASSWORD
+      WEB_HOST: '127.0.0.1'
       WEB_PASSWORD: ''
       AGENT: 'True'
+      # Container is already an isolation boundary, so the agent runs unconfined inside it
+      AGENT_PERMISSION_MODE: 'full-access'
       AGENT_MAX_CONTEXT_TOKENS: 50000
       AGENT_MAX_CONTEXT_TURNS: 20
       AGENT_MAX_STEPS: 20
+      SELF_EVOLUTION_ENABLED: 'True'
+      # Writable data root (config.json, run.log, credentials) — kept separate
+      # from the workspace so it survives image upgrades / container recreation.
+      COW_DATA_DIR: '/home/agent/.cow'
     volumes:
+      # Workspace: skills, memory, knowledge, mcp.json, conversation artifacts
       - ./cow:/home/agent/cow
+      # Data root: config.json, run.log, credentials
+      - ./cow-data:/home/agent/.cow

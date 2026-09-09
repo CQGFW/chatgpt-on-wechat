@@ -1,18 +1,16 @@
-import os
-import pathlib
-
-from config import conf
+from common.state_dir import tmp_dir
 
 
 class TmpDir(object):
-    """A temporary directory that is deleted when the object is destroyed."""
+    """Temporary directory for transient artifacts (e.g. synthesized voice).
 
-    tmpFilePath = pathlib.Path("./tmp/")
+    Resolves under the routed Agent's workspace rather than a CWD-relative
+    ``./tmp``, which is unreliable for the packaged desktop app where CWD is
+    undefined.
+    """
 
     def __init__(self):
-        pathExists = os.path.exists(self.tmpFilePath)
-        if not pathExists:
-            os.makedirs(self.tmpFilePath)
+        self.tmpFilePath = str(tmp_dir())
 
     def path(self):
         return str(self.tmpFilePath) + "/"

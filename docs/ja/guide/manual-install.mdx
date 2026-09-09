@@ -112,6 +112,15 @@ sudo docker compose up -d
 sudo docker logs -f chatgpt-on-wechat
 ```
 
+<Note>
+  **データの永続化**：`docker-compose.yml` はデフォルトで 2 つのホストディレクトリをマウントするため、コンテナの再起動や `docker compose pull` によるイメージ更新後もデータは失われません：
+
+  - `./cow` → コンテナ内 `/home/agent/cow`：ワークスペース。会話でインストールしたスキル、メモリ、ナレッジベース、`mcp.json`、会話成果物を保存します。
+  - `./cow-data` → コンテナ内 `/home/agent/.cow`：`COW_DATA_DIR` が指すデータディレクトリ。Web コンソールで保存した `config.json`、実行ログ、チャネル認証情報を保存します。
+
+  どちらのディレクトリもデフォルトで `docker-compose.yml` と同じ階層に作成されます。削除しないでください。
+</Note>
+
 <Tip>
   サーバーにデプロイする場合は、ファイアウォールまたはセキュリティグループでポート `9899` を開放して Web コンソールにアクセスできるようにしてください。セキュリティのため、特定の IP のみにアクセスを制限することを推奨します。
 </Tip>
@@ -121,24 +130,27 @@ sudo docker logs -f chatgpt-on-wechat
 ```json
 {
   "channel_type": "web",
-  "model": "MiniMax-M2.5",
+  "model": "deepseek-v4-flash",
+  "deepseek_api_key": "",
   "agent": true,
   "agent_workspace": "~/cow",
   "agent_max_context_tokens": 40000,
   "agent_max_context_turns": 30,
-  "agent_max_steps": 15
+  "agent_max_steps": 15,
+  "cow_lang": "auto"
 }
 ```
 
 | パラメータ | 説明 | デフォルト値 |
 | --- | --- | --- |
 | `channel_type` | チャネルタイプ | `web` |
-| `model` | モデル名 | `MiniMax-M2.5` |
+| `model` | モデル名 | `deepseek-v4-flash` |
 | `agent` | Agent モードを有効化 | `true` |
 | `agent_workspace` | Agent のワークスペースパス | `~/cow` |
 | `agent_max_context_tokens` | 最大コンテキストトークン数 | `40000` |
 | `agent_max_context_turns` | 最大コンテキストターン数 | `30` |
 | `agent_max_steps` | タスクごとの最大判断ステップ数 | `15` |
+| `cow_lang` | UI・コマンド文言・システムプロンプトなどの言語。`auto` で自動検出、`zh` / `en` も指定可 | `auto` |
 
 <Tip>
   すべての設定オプションはプロジェクトの [`config.py`](https://github.com/zhayujie/CowAgent/blob/master/config.py) に記載されています。

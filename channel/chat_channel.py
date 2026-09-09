@@ -10,6 +10,9 @@ from bridge.reply import *
 from channel.channel import Channel
 from common.dequeue import Dequeue
 from common import memory
+from agent.routing import AgentUnavailableError
+from common.i18n import t as _t
+from common.runtime_identity import RuntimeIdentity, use_identity
 from plugins import *
 
 try:
@@ -45,6 +48,10 @@ class ChatChannel(Channel):
         context.kwargs = kwargs
         if "channel_type" not in context:
             context["channel_type"] = self.channel_type
+        # Multi-instance routing + team: stamp the bound Agent, instance id and
+        # teammates so the router/bridge treat this as a bound (and possibly
+        # team) conversation. All empty on a legacy single-instance channel.
+        self.stamp_instance_context(context)
         if "origin_ctype" not in context:
             context["origin_ctype"] = ctype
         # context首次传入时，receiver是None，根据类型设置receiver
@@ -171,25 +178,47 @@ class ChatChannel(Channel):
             if "desire_rtype" not in context and conf().get("always_reply_voice") and ReplyType.VOICE not in self.NOT_SUPPORT_REPLYTYPE:
                 context["desire_rtype"] = ReplyType.VOICE
         elif context.type == ContextType.VOICE:
-            if "desire_rtype" not in context and conf().get("voice_reply_voice") and ReplyType.VOICE not in self.NOT_SUPPORT_REPLYTYPE:
+            # Voice input replies with voice when either voice_reply_voice
+            # (mirror voice) or the global always_reply_voice toggle is on.
+            if (
+                "desire_rtype" not in context
+                and (conf().get("voice_reply_voice") or conf().get("always_reply_voice"))
+                and ReplyType.VOICE not in self.NOT_SUPPORT_REPLYTYPE
+            ):
                 context["desire_rtype"] = ReplyType.VOICE
         return context
 
     def _handle(self, context: Context):
         if context is None or not context.content:
             return
-        logger.debug("[chat_channel] handling context: {}".format(context))
-        # reply的构建步骤
-        reply = self._generate_reply(context)
+        # The single point where an inbound message is bound to an identity.
+        # Everything below reads it from the ambient context instead of being
+        # handed a workspace path.
+        with use_identity(self._identity_for(context)):
+            logger.debug("[chat_channel] handling context: {}".format(context))
+            # reply的构建步骤
+            reply = self._generate_reply(context)
 
-        logger.debug("[chat_channel] decorating reply: {}".format(reply))
+            logger.debug("[chat_channel] decorating reply: {}".format(reply))
 
-        # reply的包装步骤
-        if reply and reply.content:
-            reply = self._decorate_reply(context, reply)
+            # reply的包装步骤
+            if reply and reply.content:
+                reply = self._decorate_reply(context, reply)
 
-            # reply的发送步骤
-            self._send_reply(context, reply)
+                # reply的发送步骤
+                self._send_reply(context, reply)
+
+    def _identity_for(self, context: Context) -> RuntimeIdentity:
+        """Resolve who this message is for.
+
+        ``produce`` already routed the context, so the agent is read back here
+        rather than resolved twice. Without this the bridge would serve the
+        bound Agent while workspace paths still resolved to the default one.
+        """
+        return RuntimeIdentity(
+            agent_id=context.get("agent_id"),
+            session_id=context.get("session_id"),
+        )
 
     def _generate_reply(self, context: Context, reply: Reply = Reply()) -> Reply:
         e_context = PluginManager().emit_event(
@@ -259,11 +288,13 @@ class ChatChannel(Channel):
                 if reply.type in self.NOT_SUPPORT_REPLYTYPE:
                     logger.error("[chat_channel]reply type not support: " + str(reply.type))
                     reply.type = ReplyType.ERROR
-                    reply.content = "不支持发送的消息类型: " + str(reply.type)
+                    reply.content = _t("不支持发送的消息类型: ", "Unsupported message type: ") + str(reply.type)
 
                 if reply.type == ReplyType.TEXT:
                     reply_text = reply.content
                     if desire_rtype == ReplyType.VOICE and ReplyType.VOICE not in self.NOT_SUPPORT_REPLYTYPE:
+                        # Preserve original text for the "text-then-voice" pattern in _send_reply.
+                        context["voice_reply_text"] = reply.content
                         reply = super().build_text_to_voice(reply.content)
                         return self._decorate_reply(context, reply)
                     if context.get("isgroup", False):
@@ -297,8 +328,12 @@ class ChatChannel(Channel):
                 logger.debug("[chat_channel] sending reply: {}, context: {}".format(reply, context))
                 
                 # 如果是文本回复，尝试提取并发送图片
-                if reply.type == ReplyType.TEXT:
+                # Web channel renders images/videos inline via renderMarkdown,
+                # so skip the extract-and-send step to avoid duplicate media.
+                if reply.type == ReplyType.TEXT and context.get("channel_type") != "web":
                     self._extract_and_send_images(reply, context)
+                elif reply.type == ReplyType.TEXT:
+                    self._send(reply, context)
                 # 如果是图片回复但带有文本内容，先发文本再发图片
                 elif reply.type == ReplyType.IMAGE_URL and hasattr(reply, 'text_content') and reply.text_content:
                     # 先发送文本
@@ -307,9 +342,26 @@ class ChatChannel(Channel):
                     # 短暂延迟后发送图片
                     time.sleep(0.3)
                     self._send(reply, context)
+                # Send text bubble before voice, unless channel already streamed
+                # the text (feishu) or natively renders STT under the voice (wechatcom).
+                elif reply.type == ReplyType.VOICE and context.get("voice_reply_text") \
+                        and not context.get("feishu_streamed") \
+                        and context.get("channel_type") not in ("wechatcom_app",):
+                    text_reply = Reply(ReplyType.TEXT, context.get("voice_reply_text"))
+                    self._send(text_reply, context)
+                    time.sleep(0.3)
+                    self._send(reply, context)
                 else:
                     self._send(reply, context)
-    
+
+                # One agent turn can produce several files (e.g. a web page plus
+                # a document). Only the first rides in `reply`; the rest follow
+                # as their own messages so none are silently dropped.
+                for extra in getattr(reply, "extra_replies", None) or []:
+                    time.sleep(0.3)
+                    logger.debug("[chat_channel] sending extra reply: {}".format(extra))
+                    self._send(extra, context)
+
     def _extract_and_send_images(self, reply: Reply, context: Context):
         """
         从文本回复中提取图片/视频URL并单独发送
@@ -357,13 +409,13 @@ class ChatChannel(Channel):
                     # Determine whether it is a remote URL or a local file.
                     if url.startswith(('http://', 'https://')):
                         if media_type == 'video':
-                            media_reply = Reply(ReplyType.FILE, url)
+                            media_reply = Reply(ReplyType.VIDEO_URL, url)
                             media_reply.file_name = os.path.basename(url)
                         else:
                             media_reply = Reply(ReplyType.IMAGE_URL, url)
                     elif os.path.exists(url):
                         if media_type == 'video':
-                            media_reply = Reply(ReplyType.FILE, f"file://{url}")
+                            media_reply = Reply(ReplyType.VIDEO, f"file://{url}")
                             media_reply.file_name = os.path.basename(url)
                         else:
                             media_reply = Reply(ReplyType.IMAGE_URL, f"file://{url}")
@@ -417,18 +469,132 @@ class ChatChannel(Channel):
 
         return func
 
+    # Chat commands that must bypass the per-session serial queue,
+    # otherwise /cancel would queue behind the task it tries to cancel.
+    # Use /cancel (not /stop) to avoid colliding with `cow stop` CLI.
+    _BYPASS_QUEUE_COMMANDS = ("/cancel",)
+
     def produce(self, context: Context):
         session_id = context["session_id"]
+        try:
+            from bridge.bridge import Bridge
+            agent_bridge = Bridge().get_agent_bridge()
+            agent_id = agent_bridge.route_context(context)
+            queue_key = agent_bridge._cancel_key(
+                agent_id, session_id, agent_bridge.agent_registry.default_agent_id
+            )
+        except AgentUnavailableError as e:
+            # This conversation is bound to an agent that is off. Answering it
+            # with the default agent would silently swap persona and memory, so
+            # say so instead.
+            logger.warning(f"[chat_channel] {e}")
+            self._send_reply(context, Reply(
+                ReplyType.TEXT,
+                _t("该助手当前已停用，请联系管理员。",
+                   "This assistant is currently disabled. Please contact an administrator."),
+            ))
+            return
+        except Exception as e:
+            logger.warning(f"[chat_channel] Agent route failed, using default: {e}")
+            agent_id = None
+            queue_key = session_id
+
+        # Fast path: /cancel must not enter the queue.
+        if context.type == ContextType.TEXT and context.content:
+            stripped = context.content.strip().lower()
+            if stripped in self._BYPASS_QUEUE_COMMANDS:
+                self._handle_cancel_command(context, session_id)
+                return
+            if re.match(r"^/steer(?:\s|$)", stripped):
+                instruction = context.content.strip()[len("/steer"):].strip()
+                self._handle_steer_command(context, session_id, instruction)
+                return
+
         with self.lock:
-            if session_id not in self.sessions:
-                self.sessions[session_id] = [
+            if queue_key not in self.sessions:
+                self.sessions[queue_key] = [
                     Dequeue(),
                     threading.BoundedSemaphore(conf().get("concurrency_in_session", 1)),
                 ]
             if context.type == ContextType.TEXT and context.content.startswith("#"):
-                self.sessions[session_id][0].putleft(context)  # 优先处理管理命令
+                self.sessions[queue_key][0].putleft(context)  # 优先处理管理命令
             else:
-                self.sessions[session_id][0].put(context)
+                self.sessions[queue_key][0].put(context)
+
+    def _handle_cancel_command(self, context: Context, session_id: str) -> None:
+        """Cancel any in-flight agent run for *session_id* and reply inline.
+
+        Runs synchronously on the caller's thread. Reply is sent through
+        _send_reply so plugins (e.g. logging) still observe it.
+        """
+        try:
+            from agent.protocol import get_cancel_registry
+            from bridge.reply import Reply, ReplyType
+
+            from bridge.bridge import Bridge
+            agent_bridge = Bridge().get_agent_bridge()
+            agent_id = agent_bridge.route_context(context)
+            scoped_session_id = agent_bridge._cancel_key(
+                agent_id, session_id, agent_bridge.agent_registry.default_agent_id
+            )
+            cancelled = get_cancel_registry().cancel_session(scoped_session_id)
+            text = (
+                _t("🛑 已中止", "🛑 Cancelled")
+                if cancelled > 0
+                else _t("当前没有可中止的任务。", "Nothing to cancel.")
+            )
+            logger.info(
+                f"[chat_channel] /cancel fast-path: session={session_id}, cancelled={cancelled}"
+            )
+            self._send_reply(context, Reply(ReplyType.TEXT, text))
+        except Exception as e:
+            logger.warning(f"[chat_channel] /cancel fast-path failed: {e}")
+
+    def _handle_steer_command(
+        self,
+        context: Context,
+        session_id: str,
+        instruction: str,
+    ) -> None:
+        """Send explicit guidance to the active run without queueing it."""
+        try:
+            from agent.protocol import SteerStatus
+            from bridge.bridge import Bridge
+
+            agent_bridge = Bridge().get_agent_bridge()
+            result = agent_bridge.steer_session(
+                session_id, instruction, agent_bridge.route_context(context)
+            )
+            messages = {
+                SteerStatus.ACCEPTED: _t(
+                    "↪️ 已引导当前任务。", "↪️ Active task redirected."
+                ),
+                SteerStatus.INACTIVE: _t(
+                    "当前没有可引导的任务。", "No active task to steer."
+                ),
+                SteerStatus.CLOSING: _t(
+                    "当前任务已结束，无法再引导。", "The active task is already finishing."
+                ),
+                SteerStatus.AMBIGUOUS: _t(
+                    "当前会话有多个任务在运行，无法确定引导目标。",
+                    "Multiple tasks are active in this session; the steering target is ambiguous.",
+                ),
+                SteerStatus.FULL: _t(
+                    "引导指令过多，请等待当前任务处理后再试。",
+                    "Too many steering updates are pending; try again after the agent processes them.",
+                ),
+                SteerStatus.INVALID: _t(
+                    "用法：/steer <引导指令>", "Usage: /steer <instruction>"
+                ),
+            }
+            text = messages[result.status]
+            logger.info(
+                f"[chat_channel] /steer fast-path: session={session_id}, "
+                f"status={result.status.value}"
+            )
+            self._send_reply(context, Reply(ReplyType.TEXT, text))
+        except Exception as e:
+            logger.warning(f"[chat_channel] /steer fast-path failed: {e}")
 
     # 消费者函数，单独线程，用于从消息队列中取出消息并处理
     def consume(self):
@@ -457,11 +623,50 @@ class ChatChannel(Channel):
                         semaphore.release()
             time.sleep(0.2)
 
+    def cancel_message(self, session_id: str, message_id: str):
+        """Cancel one channel message without disturbing later queued work.
+
+        Queued contexts are matched by their original channel message ID. An
+        in-flight agent run is cancelled through the per-request token that the
+        channel placed on the context before dispatch.
+        """
+        removed = 0
+        with self.lock:
+            session = self.sessions.get(session_id)
+            if session is not None:
+                context_queue = session[0]
+                kept = []
+                for _ in range(context_queue.qsize()):
+                    context = context_queue.get_nowait()
+                    context_queue.task_done()
+                    message = context.get("msg") if context is not None else None
+                    if getattr(message, "msg_id", None) == message_id:
+                        removed += 1
+                    else:
+                        kept.append(context)
+                for context in kept:
+                    context_queue.put(context)
+
+        from agent.protocol import get_cancel_registry
+
+        active = get_cancel_registry().cancel_request(message_id)
+        logger.info(
+            "[chat_channel] message recall: session=%s, message=%s, queued=%s, active=%s",
+            session_id,
+            message_id,
+            removed,
+            active,
+        )
+        return removed, active
+
     # 取消session_id对应的所有任务，只能取消排队的消息和已提交线程池但未执行的任务
     def cancel_session(self, session_id):
         with self.lock:
             if session_id in self.sessions:
-                for future in self.futures[session_id]:
+                # futures[session_id] is only created in consume() when a task is
+                # dispatched, so it may be absent if cancel happens right after
+                # produce() but before the first dispatch. Default to [].
+                for future in self.futures.get(session_id, []):
                     future.cancel()
                 cnt = self.sessions[session_id][0].qsize()
                 if cnt > 0:
@@ -471,7 +676,7 @@ class ChatChannel(Channel):
     def cancel_all_session(self):
         with self.lock:
             for session_id in self.sessions:
-                for future in self.futures[session_id]:
+                for future in self.futures.get(session_id, []):
                     future.cancel()
                 cnt = self.sessions[session_id][0].qsize()
                 if cnt > 0:

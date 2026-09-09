@@ -34,13 +34,18 @@ class MemoryService:
     # ------------------------------------------------------------------
     def list_files(self, page: int = 1, page_size: int = 20, category: str = "memory") -> dict:
         """
-        List memory or dream files with metadata (without content).
+        List memory, dream, or evolution files with metadata (without content).
 
         Args:
             category: ``"memory"`` (default) — MEMORY.md + daily files;
-                      ``"dream"``  — dream diary files from memory/dreams/
+                      ``"dream"``     — dream diary files from memory/dreams/;
+                      ``"evolution"`` — self-evolution logs from memory/evolution/
+                                        merged with the nightly dream diaries, so
+                                        one tab shows everything the agent learned.
         """
-        if category == "dream":
+        if category == "evolution":
+            files = self._list_evolution_files()
+        elif category == "dream":
             files = self._list_dream_files()
         else:
             files = self._list_memory_files()
@@ -93,6 +98,26 @@ class MemoryService:
 
         return files
 
+    def _list_evolution_files(self) -> List[dict]:
+        """Self-evolution logs (memory/evolution/*.md) merged with the nightly
+        dream diaries (memory/dreams/*.md), newest first.
+
+        Both are surfaced under the unified "Self-Evolution" tab. A file's
+        ``type`` records its origin so the reader can resolve the right dir.
+        """
+        files: List[dict] = []
+        for sub, ftype in (("evolution", "evolution"), ("dreams", "dream")):
+            sub_dir = os.path.join(self.memory_dir, sub)
+            if not os.path.isdir(sub_dir):
+                continue
+            for name in os.listdir(sub_dir):
+                full = os.path.join(sub_dir, name)
+                if os.path.isfile(full) and name.endswith(".md"):
+                    files.append(self._file_info(full, name, ftype))
+        # Sort newest first by filename (date-named); ties favor evolution.
+        files.sort(key=lambda f: (f["filename"], f["type"] != "evolution"), reverse=True)
+        return files
+
     # ------------------------------------------------------------------
     # content — read a single file
     # ------------------------------------------------------------------
@@ -101,8 +126,8 @@ class MemoryService:
         Read the full content of a memory or dream file.
 
         :param filename: File name, e.g. ``MEMORY.md``, ``2026-02-20.md``
-        :param category: ``"memory"`` or ``"dream"``
-        :return: dict with ``filename`` and ``content``
+        :param category: ``"memory"``, ``"dream"`` or ``"evolution"``
+        :return: dict with ``filename``, ``rel_path`` and ``content``
         :raises FileNotFoundError: if the file does not exist
         """
         path = self._resolve_path(filename, category)
@@ -114,6 +139,10 @@ class MemoryService:
 
         return {
             "filename": filename,
+            # Where this file sits under the workspace root. A caller that wants
+            # to edit it can then address it through the workspace file API
+            # instead of re-deriving the layout from filename plus category.
+            "rel_path": self._to_rel(path),
             "content": content,
         }
 
@@ -125,7 +154,7 @@ class MemoryService:
         Dispatch a memory management action.
 
         :param action: ``list`` or ``content``
-        :param payload: action-specific payload (supports ``category``: ``"memory"`` | ``"dream"``)
+        :param payload: action-specific payload (supports ``category``: ``"memory"`` | ``"dream"`` | ``"evolution"``)
         :return: protocol-compatible response dict
         """
         payload = payload or {}
@@ -166,6 +195,7 @@ class MemoryService:
         - ``MEMORY.md`` → ``{workspace_root}/MEMORY.md``
         - ``2026-02-20.md`` (memory) → ``{workspace_root}/memory/2026-02-20.md``
         - ``2026-02-20.md`` (dream) → ``{workspace_root}/memory/dreams/2026-02-20.md``
+        - ``2026-02-20.md`` (evolution) → ``{workspace_root}/memory/evolution/2026-02-20.md``
 
         Raises ValueError if the resolved path escapes the allowed directory.
         """
@@ -173,6 +203,8 @@ class MemoryService:
             base_dir = self.workspace_root
         elif category == "dream":
             base_dir = os.path.join(self.memory_dir, "dreams")
+        elif category == "evolution":
+            base_dir = os.path.join(self.memory_dir, "evolution")
         else:
             base_dir = self.memory_dir
 
@@ -183,6 +215,11 @@ class MemoryService:
             raise ValueError(f"Invalid filename: path traversal detected")
 
         return resolved
+
+    def _to_rel(self, path: str) -> str:
+        """Path relative to the workspace root, with forward slashes."""
+        root = os.path.realpath(self.workspace_root)
+        return os.path.relpath(path, root).replace(os.sep, "/")
 
     @staticmethod
     def _file_info(path: str, filename: str, file_type: str) -> dict:

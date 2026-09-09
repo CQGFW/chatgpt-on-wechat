@@ -93,14 +93,25 @@ Do NOT create auxiliary documentation files:
 
 **Critical Rule**: Only create files that the agent will actually execute (scripts) or that are too large for SKILL.md (references). Documentation, examples, and guides ALL belong in SKILL.md.
 
-## Installing a Skill from URL
+## Installing a Skill
 
-1. Fetch the URL content (curl or web_fetch tool)
+Install target directory: `<workspace>/skills/<name>/` (the `<workspace>` is from the "Workspace" section).
+
+### Step 1 — Obtain skill content
+
+| Source | Action |
+|---|---|
+| URL (single file) | Fetch content via curl or web_fetch |
+| URL (zip/archive) | Download and extract to a temp directory |
+| Local file (SKILL.md) | Read directly |
+| Local archive (zip) | Extract to a temp directory |
+
+### Step 2 — Identify and install
+
+1. Locate the SKILL.md (may be at top level or inside a subdirectory)
 2. Extract `name` from YAML frontmatter
-3. Create directory `<workspace>/skills/<name>/` and save content as `SKILL.md`
-4. Check the saved SKILL.md for an installation/setup section — if it defines additional steps (e.g., downloading scripts, installing dependencies), execute them; otherwise installation is complete
-
-The `<workspace>` is the working directory from the "工作空间" section.
+3. Copy the **entire skill directory** (SKILL.md and all sibling files/folders such as `references/`, `scripts/`, `assets/`, etc.) into `<workspace>/skills/<name>/`
+4. If an install/setup file exists (e.g. INSTALL.md), follow its instructions — the final result must still end up in `<workspace>/skills/<name>/`
 
 ## Skill Creation Process (from scratch)
 
@@ -193,7 +204,7 @@ scripts/init_skill.py my-skill --path <workspace>/skills --resources scripts,ref
 scripts/init_skill.py my-skill --path <workspace>/skills --resources scripts --examples
 ```
 
-Where `<workspace>` is your workspace directory shown in the "工作空间" section of the system prompt.
+Where `<workspace>` is your workspace directory shown in the "Workspace" section of the system prompt.
 
 The script:
 
@@ -204,7 +215,7 @@ The script:
 
 After initialization, customize the SKILL.md and add resources as needed. If you used `--examples`, replace or delete placeholder files.
 
-**Important**: Always create skills in workspace skills directory (`<workspace>/skills`), NOT in project directory. Check the "工作空间" section for the actual workspace path.
+**Important**: Always create skills in workspace skills directory (`<workspace>/skills`), NOT in project directory. Check the "Workspace" section for the actual workspace path.
 
 ### Step 4: Edit the Skill
 

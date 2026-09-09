@@ -68,7 +68,7 @@ def _parse_github_url(url: str):
     if not m:
         return None
     owner, repo, branch, subpath = m.groups()
-    return owner, repo, branch or "main", subpath
+    return owner, repo, branch, subpath
 
 
 def _parse_gitlab_url(url: str):
@@ -84,7 +84,7 @@ def _parse_gitlab_url(url: str):
     if not m:
         return None
     owner, repo, branch, subpath = m.groups()
-    return owner, repo, branch or "main", subpath
+    return owner, repo, branch, subpath
 
 
 def _parse_git_ssh_url(url: str):
@@ -120,6 +120,20 @@ def _clone_repo(git_url: str):
         shutil.rmtree(tmp_dir, ignore_errors=True)
         raise RuntimeError(f"git clone failed: {e}")
     return tmp_dir, repo_dir
+
+
+def _resolve_github_default_branch(owner: str, repo: str, timeout: int = 30) -> str:
+    """Resolve the default branch of a GitHub repository via the API.
+
+    Falls back to 'main' if the API call fails.
+    """
+    try:
+        api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        resp = requests.get(api_url, timeout=timeout, headers={"Accept": "application/vnd.github.v3+json"})
+        resp.raise_for_status()
+        return resp.json().get("default_branch", "main")
+    except Exception:
+        return "main"
 
 
 def _download_repo_zip(spec: str, branch: str = "main", host: str = "github", timeout: int = 30):
@@ -475,10 +489,21 @@ def _install_targz_bytes(content: bytes, name: str, skills_dir: str, result: Ins
         extract_dir = os.path.join(tmp_dir, "extracted")
         os.makedirs(extract_dir)
         with tarfile.open(tar_path, "r:gz") as tf:
+            extraction_root = os.path.realpath(extract_dir)
             for member in tf.getmembers():
                 resolved = os.path.realpath(os.path.join(extract_dir, member.name))
-                if not resolved.startswith(os.path.realpath(extract_dir)):
+                try:
+                    inside_root = (
+                        os.path.commonpath((extraction_root, resolved)) == extraction_root
+                    )
+                except ValueError:
+                    inside_root = False
+                if not inside_root:
                     raise SkillInstallError("Archive contains path traversal, aborting.")
+                if member.issym() or member.islnk():
+                    raise SkillInstallError("Archive contains a link, aborting.")
+                if not (member.isfile() or member.isdir()):
+                    raise SkillInstallError("Archive contains a special file, aborting.")
             tf.extractall(extract_dir)
 
         top_items = [d for d in os.listdir(extract_dir) if not d.startswith(".")]
@@ -517,18 +542,26 @@ def _install_targz_bytes(content: bytes, name: str, skills_dir: str, result: Ins
 
 def _print_install_success(name: str, source: str):
     """Print a unified install success message with description and source."""
+    from cli.utils import get_cli_language
+
+    # Import `common` only after get_cli_language() runs ensure_sys_path(),
+    # so it works when `cow` is invoked from outside the project directory.
+    get_cli_language()  # resolve cow_lang so i18n.t reflects config
+    from common import i18n
+    _t = i18n.t
+
     skills_dir = get_skills_dir()
     config = load_skills_config()
     display = config.get(name, {}).get("display_name", "")
     desc = _read_skill_description(os.path.join(skills_dir, name))
     click.echo(click.style(f"✓ {name}", fg="green"))
     if display and display != name:
-        click.echo(f"  名称: {display}")
+        click.echo(_t(f"  名称: {display}", f"  Name: {display}"))
     if desc:
         if len(desc) > 60:
             desc = desc[:57] + "…"
-        click.echo(f"  描述: {desc}")
-    click.echo(f"  来源: {source}")
+        click.echo(_t(f"  描述: {desc}", f"  Description: {desc}"))
+    click.echo(_t(f"  来源: {source}", f"  Source: {source}"))
 
 
 def _validate_skill_name(name: str):
@@ -644,30 +677,50 @@ def _list_local():
     skills_dir = get_skills_dir()
     builtin_dir = get_builtin_skills_dir()
 
+    # Merge builtin skills that are on disk but missing from config
+    _merge_builtin_into_config(config, builtin_dir, skills_dir)
+
     if not config:
-        # Fallback: scan directories directly
-        entries = []
-        for d in [builtin_dir, skills_dir]:
-            if not os.path.isdir(d):
-                continue
-            source = "builtin" if d == builtin_dir else "custom"
-            for name in sorted(os.listdir(d)):
-                skill_path = os.path.join(d, name)
-                if os.path.isdir(skill_path) and not name.startswith("."):
-                    has_skill_md = os.path.exists(os.path.join(skill_path, "SKILL.md"))
-                    if has_skill_md:
-                        entries.append({"name": name, "source": source, "enabled": True, "description": ""})
-        if not entries:
-            click.echo("No skills installed.")
-            return
-        _print_skill_table(entries)
+        click.echo("No skills installed.")
         return
 
     entries = sorted(config.values(), key=lambda x: x.get("name", ""))
-    if not entries:
-        click.echo("No skills installed.")
-        return
     _print_skill_table(entries)
+
+
+def _merge_builtin_into_config(config: dict, builtin_dir: str, skills_dir: str):
+    """Scan builtin and custom dirs, add any new skills into config dict."""
+    dirty = False
+    for d, source in [(builtin_dir, "builtin"), (skills_dir, "custom")]:
+        if not os.path.isdir(d):
+            continue
+        for name in os.listdir(d):
+            if name.startswith(".") or name in ("skills_config.json",):
+                continue
+            skill_path = os.path.join(d, name)
+            if not os.path.isdir(skill_path):
+                continue
+            if not os.path.isfile(os.path.join(skill_path, "SKILL.md")):
+                continue
+            if name in config:
+                continue
+            desc = _read_skill_description(skill_path)
+            config[name] = {
+                "name": name,
+                "description": desc,
+                "source": source,
+                "enabled": True,
+                "category": "skill",
+            }
+            dirty = True
+    if dirty:
+        config_path = os.path.join(skills_dir, "skills_config.json")
+        try:
+            os.makedirs(skills_dir, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4, ensure_ascii=False)
+        except Exception:
+            pass
 
 
 def _print_skill_table(entries):
@@ -1121,7 +1174,7 @@ def _install_hub(name, result: InstallResult, provider=None):
     raise SkillInstallError("Unexpected response from Skill Hub.")
 
 
-def _install_github(spec, result: InstallResult, subpath=None, skill_name=None, branch="main", source="github", timeout=30):
+def _install_github(spec, result: InstallResult, subpath=None, skill_name=None, branch=None, source="github", timeout=30):
     """Install skill(s) from a GitHub repo.
 
     Strategy: zip download first (no API rate limit), Contents API as fallback.
@@ -1134,6 +1187,10 @@ def _install_github(spec, result: InstallResult, subpath=None, skill_name=None, 
     skills_dir = get_skills_dir()
     os.makedirs(skills_dir, exist_ok=True)
     owner, repo = spec.split("/", 1)
+
+    # Resolve default branch if not specified (#3069)
+    if not branch:
+        branch = _resolve_github_default_branch(owner, repo, timeout=timeout)
 
     result.messages.append(f"Downloading from GitHub: {spec} (branch: {branch})...")
 
@@ -1235,12 +1292,24 @@ def _install_from_repo_root(repo_root, spec, subpath, skill_name, skills_dir, so
         _batch_install_skills(discovered, spec, skills_dir, source, result)
 
 
-def _install_gitlab(spec, result: InstallResult, subpath=None, branch="main"):
+def _install_gitlab(spec, result: InstallResult, subpath=None, branch=None):
     """Install skill(s) from a GitLab repo via zip download."""
     _check_github_spec(spec)
 
     skills_dir = get_skills_dir()
     os.makedirs(skills_dir, exist_ok=True)
+
+    owner, repo = spec.split("/", 1)
+
+    # Resolve default branch if not specified
+    if not branch:
+        try:
+            api_url = f"https://gitlab.com/api/v4/projects/{owner}%2F{repo}"
+            resp = requests.get(api_url, timeout=30)
+            resp.raise_for_status()
+            branch = resp.json().get("default_branch", "main")
+        except Exception:
+            branch = "main"
 
     result.messages.append(f"Downloading from GitLab: {spec} (branch: {branch})...")
 
@@ -1355,6 +1424,13 @@ def uninstall(name, yes):
                 json.dump(config, f, indent=4, ensure_ascii=False)
         except Exception:
             pass
+
+    # Scrub the removed skill from any Agent's selection so team.json self-heals.
+    try:
+        from agent.admin import get_agent_admin_service
+        get_agent_admin_service().prune_skill(name)
+    except Exception:
+        pass
 
     click.echo(click.style(f"✓ Skill '{name}' uninstalled.", fg="green"))
 

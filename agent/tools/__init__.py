@@ -9,10 +9,18 @@ from agent.tools.edit.edit import Edit
 from agent.tools.bash.bash import Bash
 from agent.tools.ls.ls import Ls
 from agent.tools.send.send import Send
+from agent.tools.search_files.search_files import SearchFiles
 
 # Import memory tools
 from agent.tools.memory.memory_search import MemorySearchTool
 from agent.tools.memory.memory_get import MemoryGetTool
+
+# Import self-evolution tools
+from agent.tools.evolution_undo.evolution_undo import EvolutionUndoTool
+from agent.tools.agent_delegate.agent_delegate import AgentDelegateTool
+
+# Import sub agent tools
+from agent.tools.subagent.subagent import SubagentTool
 
 # Import tools with optional dependencies
 def _import_optional_tools():
@@ -87,25 +95,35 @@ FileSave = _optional_tools.get('FileSave')
 Terminal = _optional_tools.get('Terminal')
 
 
-# BrowserTool (requires playwright)
+# BrowserTool: playwright is soft-imported inside browser_service, so this
+# import always succeeds even without playwright. Readiness (playwright pkg /
+# system Chrome / downloaded Chromium) is checked at call time in BrowserTool.
 def _import_browser_tool():
     from common.log import logger
     try:
         from agent.tools.browser.browser_tool import BrowserTool
         return BrowserTool
-    except ImportError as e:
-        logger.info(
-            f"[Tools] BrowserTool not loaded - missing dependency: {e}\n"
-            f"  To enable browser tool, run:\n"
-            f"    pip install playwright\n"
-            f"    playwright install chromium"
-        )
-        return None
     except Exception as e:
         logger.error(f"[Tools] BrowserTool failed to load: {e}")
         return None
 
 BrowserTool = _import_browser_tool()
+
+# MCP Tools (no extra dependencies, loaded on demand)
+def _import_mcp_tools():
+    """导入 MCP 工具模块（无额外依赖，按需加载）"""
+    from common.log import logger
+    try:
+        from agent.tools.mcp.mcp_tool import McpTool
+        from agent.tools.mcp.mcp_client import McpClientRegistry
+        return {'McpTool': McpTool, 'McpClientRegistry': McpClientRegistry}
+    except Exception as e:
+        logger.warning(f"[Tools] MCP tools not loaded: {e}")
+        return {}
+
+_mcp_tools = _import_mcp_tools()
+McpTool = _mcp_tools.get('McpTool')
+McpClientRegistry = _mcp_tools.get('McpClientRegistry')
 
 # Export all tools (including optional ones that might be None)
 __all__ = [
@@ -117,14 +135,19 @@ __all__ = [
     'Bash',
     'Ls',
     'Send',
+    'SearchFiles',
     'MemorySearchTool',
     'MemoryGetTool',
+    'EvolutionUndoTool',
+    'SubagentTool',
+    'AgentDelegateTool',
     'EnvConfig',
     'SchedulerTool',
     'WebSearch',
     'WebFetch',
     'Vision',
     'BrowserTool',
+    'McpTool',
 ]
 
 """

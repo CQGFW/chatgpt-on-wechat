@@ -4,15 +4,40 @@ Browser tool - Control a Chromium browser for web navigation and interaction.
 Uses Playwright under the hood. Browser instance is lazily started on first
 use, reused across tool calls within the same session, and cleaned up via
 close().
+
+Launch modes (configured under `tools.browser` in config.json):
+  - persistent (default): Chromium runs with a persistent user_data_dir
+    (default `~/.cow/browser_profile`), so cookies and login state survive
+    across runs. The user only needs to log in once.
+  - cdp: When `cdp_endpoint` is set, attach to an externally launched Chrome
+    via the Chrome DevTools Protocol. Lets the agent reuse the user's real
+    browser (with all logins / extensions / true fingerprints).
+  - fresh: Set `persistent` to false to fall back to a clean context every run.
 """
 
+import ipaddress
 import json
 import os
+import socket
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse
 
 from agent.tools.base_tool import BaseTool, ToolResult
 from agent.tools.browser.browser_service import BrowserService
 from common.log import logger
+from common.utils import is_cloud_deployment, memory_headroom_mb
+
+
+# Cloud-metadata endpoints worth blocking even though they are not link-local.
+# (169.254.169.254 — AWS/GCP/Azure IMDS — is already covered by is_link_local;
+# fd00:ec2::254 is the AWS IPv6 IMDS address.)
+_CLOUD_METADATA_IPS = frozenset({ipaddress.ip_address("fd00:ec2::254")})
+
+# Memory a browser engine needs to start and render a real page: the engine's
+# own processes plus the driver that supervises them. Launching below this leaves
+# the whole runtime without room, and since page cache then gets evicted and
+# faulted back in continuously, every unrelated operation slows to a crawl too.
+_MIN_LAUNCH_HEADROOM_MB = 300
 
 
 class BrowserTool(BaseTool):
@@ -25,7 +50,10 @@ class BrowserTool(BaseTool):
         "get_text, press, evaluate.\n\n"
         "Workflow: navigate (auto-includes snapshot with element refs) → click/fill/select by ref → snapshot to verify.\n\n"
         "Use snapshot as the primary way to read pages. Use screenshot + send to show key results to the user. "
-        "For login/CAPTCHA/authorization etc., screenshot and ask the user for help."
+        "For login/CAPTCHA/authorization etc., screenshot and ask the user for help. "
+        "Login state is persisted across sessions (cookies / localStorage are kept in a "
+        "user profile directory), so once the user logs in to a site, the agent can keep "
+        "using it without logging in again."
     )
 
     params: dict = {
@@ -109,6 +137,138 @@ class BrowserTool(BaseTool):
         BrowserTool._shared_service = self._service
         return self._service
 
+    def _allow_private_targets(self) -> bool:
+        """Whether the link-local / cloud-metadata guard is disabled.
+
+        Defaults to False (guard active). Loopback and RFC1918/LAN targets are
+        always reachable so local dev servers work out of the box; this opt-out
+        only lifts the remaining block on link-local / cloud-metadata targets,
+        for an operator who deliberately needs them, by setting
+        ``allow_private_targets: true`` under ``tools.browser`` in config.json.
+        """
+        return bool(self.config.get("allow_private_targets", False))
+
+    @staticmethod
+    def _validate_url_safe(url: str) -> None:
+        """Reject URLs that target link-local / cloud-metadata addresses (SSRF guard).
+
+        Resolves the hostname to its IP address(es) and blocks any that are
+        link-local (169.254.0.0/16 — which includes the 169.254.169.254
+        cloud-metadata endpoint — and IPv6 fe80::/10) or a known IPv6
+        cloud-metadata address. Also rejects URLs with no host, non-HTTP(S)
+        schemes, or hosts that fail DNS resolution.
+
+        Loopback and RFC1918/LAN targets are intentionally left reachable:
+        unlike the vision/web_fetch tools, the browser legitimately opens local
+        pages (a dev server on ``localhost`` / ``127.0.0.1`` / a LAN IP), so a
+        blanket "block all internal" policy would break that core workflow.
+
+        Raises:
+            ValueError: if the URL targets a disallowed address.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+
+        hostname = parsed.hostname
+        if not hostname:
+            raise ValueError("URL has no hostname")
+
+        try:
+            # Resolve all addresses for the hostname.
+            addr_infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror:
+            raise ValueError(f"Cannot resolve hostname: {hostname}")
+
+        for family, _, _, _, sockaddr in addr_infos:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            # Block only the high-risk targets — link-local (incl. the
+            # 169.254.169.254 cloud-metadata endpoint) and the IPv6 metadata
+            # address. Loopback and RFC1918/LAN stay reachable for local dev.
+            if ip.is_link_local or ip in _CLOUD_METADATA_IPS:
+                raise ValueError(
+                    f"URL resolves to a link-local / cloud-metadata address "
+                    f"({ip_str}), request blocked for security"
+                )
+
+    def _check_memory_budget(self) -> Optional[ToolResult]:
+        """Refuse to launch when there is not enough memory left to do it safely.
+
+        Only applies where the runtime enforces a memory limit small enough that a
+        browser cannot fit; installs that manage their own resources are left
+        untouched. Skipped once a browser is already running, so an in-progress
+        session is never interrupted mid-task, and skipped in CDP mode where the
+        browser is an external process we merely attach to.
+
+        The threshold is configurable via ``min_memory_mb`` under
+        ``tools.browser`` (0 disables the check).
+        """
+        if not is_cloud_deployment():
+            return None
+        if self.config.get("cdp_endpoint"):
+            return None
+        running = BrowserTool._shared_service
+        if running is not None and running.is_running():
+            return None
+
+        threshold = self.config.get("min_memory_mb", _MIN_LAUNCH_HEADROOM_MB)
+        try:
+            threshold = float(threshold)
+        except (TypeError, ValueError):
+            threshold = _MIN_LAUNCH_HEADROOM_MB
+        if threshold <= 0:
+            return None
+
+        headroom = memory_headroom_mb()
+        if headroom is None or headroom >= threshold:
+            return None
+
+        logger.warning(
+            f"[Browser] Not enough memory to launch: {headroom:.0f}MB free, "
+            f"{threshold:.0f}MB required"
+        )
+        return ToolResult.fail(
+            "Browser unavailable: this deployment does not have enough memory to "
+            f"run one ({headroom:.0f}MB free, {threshold:.0f}MB needed). "
+            "Use web_search to gather the information instead, and tell the user "
+            "the browser needs a larger memory allocation. Do not retry this tool."
+        )
+
+    def _check_engine_ready(self) -> Optional[ToolResult]:
+        """Return an actionable onboarding message if no browser engine is ready.
+
+        Returns None when a system Chrome/Edge or a downloaded Chromium is
+        available (so the tool can proceed). Otherwise returns a ToolResult with
+        clear guidance so the agent asks the user to enable the browser instead
+        of surfacing a raw Playwright launch error. CDP mode is exempt (the
+        endpoint is external and validated at connect time).
+        """
+        if self.config.get("cdp_endpoint"):
+            return None
+        try:
+            from agent.tools.browser.browser_env import capability_summary
+            summary = capability_summary(self.config)
+        except Exception as e:
+            logger.debug(f"[Browser] capability probe failed: {e}")
+            return None
+
+        if summary.get("ready"):
+            return None
+
+        # Desktop clients (dev or packaged) have no `cow` CLI — onboard via the
+        # in-chat `/install-browser` command. Source / web / server installs use
+        # the `cow install-browser` terminal command.
+        install_hint = (
+            "reply `/install-browser`" if summary.get("is_desktop")
+            else "run `cow install-browser` in a terminal"
+        )
+        return ToolResult.fail(
+            f"Browser tool not ready. Ask the user to {install_hint} (installs a browser engine; "
+            "skipped automatically if Google Chrome is already installed). "
+            "Do not retry until the user confirms."
+        )
+
     def execute(self, args: Dict[str, Any]) -> ToolResult:
         action = args.get("action", "").strip().lower()
         if not action:
@@ -118,6 +278,19 @@ class BrowserTool(BaseTool):
         if not handler:
             valid = ", ".join(sorted(self._ACTION_MAP.keys()))
             return ToolResult.fail(f"Unknown action '{action}'. Valid actions: {valid}")
+
+        # Preflight: on desktop the playwright package is bundled but the browser
+        # binary may be missing; return actionable onboarding instead of a cryptic
+        # launch failure.
+        not_ready = self._check_engine_ready()
+        if not_ready is not None:
+            return not_ready
+
+        # An engine being installed is not enough: launching it without room to
+        # spare degrades everything else in the runtime, so check that too.
+        no_budget = self._check_memory_budget()
+        if no_budget is not None:
+            return no_budget
 
         try:
             return handler(self, args)
@@ -133,8 +306,19 @@ class BrowserTool(BaseTool):
         url = args.get("url", "").strip()
         if not url:
             return ToolResult.fail("Error: 'url' is required for navigate action")
-        if not url.startswith(("http://", "https://")):
+        # Only auto-prepend https:// for bare hosts; preserve file://, about:, data:, etc.
+        if "://" not in url and not url.startswith(("about:", "data:")):
             url = "https://" + url
+        # SSRF guard: for http(s) targets, reject hosts that resolve to
+        # link-local / cloud-metadata addresses before the browser navigates
+        # (and then auto-snapshots the page back to the model). Loopback and
+        # RFC1918/LAN are allowed so local dev servers work. Non-HTTP schemes
+        # (about:/data:/file:/chrome:) are not network-egress targets here.
+        if url.split(":", 1)[0].lower() in ("http", "https") and not self._allow_private_targets():
+            try:
+                self._validate_url_safe(url)
+            except ValueError as e:
+                return ToolResult.fail(f"Error: {e}")
         timeout = args.get("timeout", 30000)
         service = self._get_service()
         result = service.navigate(url, timeout=timeout)

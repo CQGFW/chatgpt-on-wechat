@@ -22,7 +22,7 @@ class MinimaxBot(Bot):
     def __init__(self):
         super().__init__()
         self.args = {
-            "model": conf().get("model") or "MiniMax-M2.7",
+            "model": conf().get("model") or "MiniMax-M3",
             "temperature": conf().get("temperature", 0.3),
             "top_p": conf().get("top_p", 0.95),
         }
@@ -201,7 +201,7 @@ class MinimaxBot(Bot):
                 "Content-Type": "application/json",
             }
             resp = requests.post(f"{self.api_base}/chat/completions",
-                                 headers=headers, json=payload, timeout=60)
+                                 headers=headers, json=payload, timeout=180)
             if resp.status_code != 200:
                 return {"error": True, "message": f"HTTP {resp.status_code}: {resp.text[:300]}"}
             data = resp.json()
@@ -540,6 +540,7 @@ class MinimaxBot(Bot):
             current_reasoning = []
             finish_reason = None
             chunk_count = 0
+            stream_usage = None  # Provider-reported token usage
 
             # Process SSE stream
             for line in response.iter_lines():
@@ -576,6 +577,11 @@ class MinimaxBot(Bot):
                         "status_code": int(http_code) if http_code.isdigit() else 500
                     }
                     return
+
+                # MiniMax reports usage on a trailing chunk (sometimes with an
+                # empty choices list) — capture it before the skip below.
+                if isinstance(chunk.get("usage"), dict):
+                    stream_usage = chunk["usage"]
 
                 if not chunk.get("choices"):
                     continue
@@ -670,14 +676,17 @@ class MinimaxBot(Bot):
                     logger.debug(f"[MINIMAX] {reasoning_text}")
                 logger.debug(f"[MINIMAX] ===== End Reasoning Details =====")
 
-            # Yield final chunk with finish_reason (OpenAI format)
-            yield {
+            # Yield final chunk with finish_reason (+ usage when reported)
+            final_chunk = {
                 "choices": [{
                     "index": 0,
                     "delta": {},
                     "finish_reason": finish_reason
                 }]
             }
+            if stream_usage is not None:
+                final_chunk["usage"] = stream_usage
+            yield final_chunk
 
         except requests.exceptions.Timeout:
             logger.error("[MINIMAX] Request timeout")
