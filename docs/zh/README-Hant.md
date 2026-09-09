@@ -48,7 +48,7 @@ CowAgent 輕量、易部署、可擴充，自由接入主流大模型，覆蓋�
 | 能力 | 說明 |
 | :--- | :--- |
 | [任務規劃](https://docs.cowagent.ai/zh/intro/architecture) | 理解複雜任務並自主分解執行，迴圈呼叫工具直到完成目標 |
-| [多智能體團隊](https://docs.cowagent.ai/zh/multi-agent/team) | 創建多個 Agent 組成團隊，各自擁有獨立的職責、模型、技能與知識，在同一會話中分工協作 |
+| [多智能體](https://docs.cowagent.ai/zh/multi-agent/team) | 創建多個 Agent 組成團隊，各自擁有獨立的職責、模型、技能與知識，在同一會話中分工協作 |
 | [長期記憶](https://docs.cowagent.ai/zh/memory) | 三層記憶架構（上下文 → 天級 → 核心），夢境蒸餾自動整理，支援關鍵詞與向量混合檢索 |
 | [知識庫](https://docs.cowagent.ai/zh/knowledge) | 自動整理結構化知識為 Markdown Wiki，構建持續增長的知識圖譜，視覺化瀏覽 |
 | [自主進化](https://docs.cowagent.ai/zh/memory/self-evolution) | 自動覆盤對話，最佳化技能、處理未完成事項、沉澱記憶與知識，在使用中持續成長 |

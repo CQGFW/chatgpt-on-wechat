@@ -5,7 +5,9 @@ description: Build multiple Agents into a team, give each its own role, and let 
 
 CowAgent is no longer a single Agent. You can create multiple Agents to form a team: each member has its own responsibilities, model, skills, and knowledge, working independently or being brought into the same session to collaborate.
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/team-overview.png" alt="Multi-agent team" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/team-overview.png" alt="Multi-agent team" width="800"/>
+</Frame>
 
 ## Why a Team
 
@@ -28,7 +30,9 @@ Click Create on the "Agent Team" page in the Web console or desktop client to ad
 - **Skills and knowledge**: these can be shared with the team, or an Agent can have its own dedicated knowledge base that stays isolated from the others.
 - **Copy from an existing Agent**: when creating a new Agent, you can copy an existing Agent's configuration, skills, and knowledge as a starting point.
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-create.png" alt="Agent-create" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-create.png" alt="Agent-create" width="800"/>
+</Frame>
 
 
 Once created, the Agent appears in the team list. Click any member, and on the right you can switch between "Overview / Skills / Core Files" to configure its basic information, enabled skills, and its persona and rule files (`AGENT.md`, `RULE.md`, and so on).
@@ -56,7 +60,9 @@ In an existing session, the Agent selector at the bottom left of the input box l
 - **Add member**: add another Agent to the current session, turning it into a group chat.
 - **Remove member**: remove a member from the current session.
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-group-session.png" alt="Agent-team-group" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-group-session.png" alt="Agent-team-group" width="800"/>
+</Frame>
 
 
 In a group chat, each Agent answers with its own configured model, and the bubble shows which Agent is speaking. Members in the same session read the same record and can see what others have said.
@@ -75,7 +81,9 @@ On the "Channels" page, set the bound Agent for a connected instance:
 - You can add more members, and the owner assigns suitable tasks to them based on their responsibilities.
 - In the channel, use `@` followed by a member's name or ID to talk to that member directly.
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/channel-config.png" alt="Agent-team-channel" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/channel-config.png" alt="Agent-team-channel" width="800"/>
+</Frame>
 
 
 Binding changes take effect immediately, with no need to restart the channel. Channels that support multiple instances include WeChat, WeCom bots, DingTalk, Feishu, QQ, Telegram, Slack, Discord, and more.
@@ -88,7 +96,9 @@ Multiple Agents in the same session collaborate in two ways.
 
 In a group chat, use `@` followed by a member's name to hand the current turn to a specific Agent. Typing `@` brings up the members in the current session to choose from, and once sent, the bubble carries the avatar of the directed Agent to mark who is responsible for that turn.
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-group-chat-demo.png" alt="Agent-team-group" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-group-chat-demo.png" alt="Agent-team-group" width="800"/>
+</Frame>
 
 
 ### 2. Lead Agent and Delegation
@@ -102,7 +112,9 @@ A group chat always has a lead Agent (the owner). Unless the user `@`s someone e
 Details such as the delegation scope, chain depth, and time budget are handled by the [agent_delegate tool](/tools/delegate) and can be adjusted in the configuration.
 
 
-<img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-delegate.png" alt="Agent-team-delegate" width="800"/>
+<Frame>
+  <img src="https://cdn.jsdelivr.net/gh/zhayujie/cowagent-assets@main/screenshots/en/agent-delegate.png" alt="Agent-team-delegate" width="800"/>
+</Frame>
 
 
 

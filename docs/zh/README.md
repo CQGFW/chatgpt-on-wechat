@@ -48,7 +48,7 @@ CowAgent 轻量、易部署、可扩展，自由接入主流大模型，覆盖�
 | 能力 | 说明 |
 | :--- | :--- |
 | [任务规划](https://docs.cowagent.ai/zh/intro/architecture) | 理解复杂任务并自主分解执行，循环调用工具直到完成目标 |
-| [多智能体团队](https://docs.cowagent.ai/zh/multi-agent/team) | 创建多个 Agent 组成团队，各自拥有独立的记忆、能力与知识，通过分工协作完成任务 |
+| [多智能体](https://docs.cowagent.ai/zh/multi-agent/team) | 创建多个 Agent 组成团队，各自拥有独立的记忆、能力与知识，通过分工协作完成任务 |
 | [长期记忆](https://docs.cowagent.ai/zh/memory) | 三层记忆架构（上下文 → 天级 → 核心），梦境蒸馏自动整理，支持关键词与向量混合检索 |
 | [知识库](https://docs.cowagent.ai/zh/knowledge) | 自动整理结构化知识为 Markdown Wiki，构建持续增长的知识图谱，可视化浏览 |
 | [自主进化](https://docs.cowagent.ai/zh/memory/self-evolution) | 自动复盘对话，优化技能、处理未完成事项、沉淀记忆与知识，在使用中持续成长 |
